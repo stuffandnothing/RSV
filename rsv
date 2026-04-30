@@ -1,0 +1,279 @@
+#!/bin/bash
+# rsv - runit service manager wrapper
+# Usage: rsv [--user] <command> [service]
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+_info()    { echo -e "${BLUE}==>${NC} ${BOLD}$*${NC}"; }
+_ok()      { echo -e "${GREEN}ok${NC}: $*"; }
+_warn()    { echo -e "${YELLOW}warn${NC}: $*"; }
+_error()   { echo -e "${RED}error${NC}: $*"; exit 1; }
+
+# --- Mode selection -----------------------------------------------------------
+
+USER_MODE=0
+if [[ "$1" == "--user" ]]; then
+    USER_MODE=1
+    shift
+elif [[ $EUID -ne 0 ]]; then
+    USER_MODE=1
+fi
+
+if [[ $USER_MODE -eq 1 ]]; then
+    SVDIR="${RUNIT_SVDIR:-$HOME/.runit/sv}"
+    RUNSVDIR="${RUNIT_RUNSVDIR:-$HOME/.runit/runsvdir}"
+    LOG_FILE="${RUNIT_LOG:-$HOME/.runit/log/everything/current}"
+else
+    SVDIR="/etc/runit/sv"
+    RUNSVDIR="/etc/runit/runsvdir/default"
+    SV_SOCK_DIR=""
+    LOG_FILE="/var/log/everything/current"
+fi
+
+# --- Helpers ------------------------------------------------------------------
+
+_NEEDS_ROOT=(start stop restart enable disable reload)
+
+_check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        _error "command '$1' requires root (or use --user for user services)"
+    fi
+}
+
+_needs_root() {
+    [[ $USER_MODE -eq 1 ]] && return 1  # user mode never needs root
+    local cmd="$1"
+    for c in "${_NEEDS_ROOT[@]}"; do
+        [[ "$c" == "$cmd" ]] && return 0
+    done
+    return 1
+}
+
+_check_service_exists() {
+    if [[ ! -d "$SVDIR/$1" ]]; then
+        # Check if the service exists in the other mode and suggest the right invocation
+        if [[ $USER_MODE -eq 1 ]]; then
+            local sys_svdir="/etc/runit/sv"
+            if [[ -d "$sys_svdir/$1" ]]; then
+                echo -e "${RED}error${NC}: service '$1' not found in $SVDIR"
+                echo -e "${YELLOW}hint${NC}:  did you mean: ${BOLD}sudo rsv $CMD $1${NC}"
+                exit 1
+            fi
+        else
+            local user_svdir="${RUNIT_SVDIR:-$HOME/.runit/sv}"
+            if [[ -d "$user_svdir/$1" ]]; then
+                echo -e "${RED}error${NC}: service '$1' not found in $SVDIR"
+                echo -e "${YELLOW}hint${NC}:  did you mean: ${BOLD}rsv --user $CMD $1${NC}"
+                exit 1
+            fi
+        fi
+        _error "service '$1' not found in $SVDIR"
+    fi
+}
+
+_check_service_enabled() {
+    if [[ ! -L "$RUNSVDIR/$1" ]]; then
+        _error "service '$1' is not enabled"
+    fi
+}
+
+_is_internal() {
+    [[ "$1" == "current" || "$1" == "supervise" || "$1" == ".supervisor" ]]
+}
+
+# sv wrapper: in user mode pass the full service path instead of just the name
+_sv() {
+    if [[ $USER_MODE -eq 1 ]]; then
+        local cmd="$1"; shift
+        sv "$cmd" "$SVDIR/$1"
+    else
+        sv "$@"
+    fi
+}
+
+# --- User-mode supervisor management ------------------------------------------
+
+cmd_init() {
+    [[ $USER_MODE -eq 0 ]] && _error "'init' is only for user mode (use --user or run as non-root)"
+
+    if pgrep -u "$USER" -f "runsvdir.*$RUNSVDIR" >/dev/null 2>&1; then
+        _warn "user runsvdir is already running"
+        exit 0
+    fi
+
+    mkdir -p "$SVDIR" "$RUNSVDIR" "$(dirname "$LOG_FILE")"
+
+    nohup runsvdir "$RUNSVDIR" >/dev/null 2>&1 &
+    disown
+    _ok "user runsvdir started (PID $!)"
+    _info "tip: add 'rsv --user init' to your session startup (~/.profile, ~/.xinitrc, etc.)"
+}
+
+# --- Service commands ---------------------------------------------------------
+
+cmd_start() {
+    _check_service_exists "$1"
+    _check_service_enabled "$1"
+    _sv start "$1" && _ok "started '$1'" || _error "failed to start '$1'"
+}
+
+cmd_stop() {
+    _check_service_exists "$1"
+    _check_service_enabled "$1"
+    _sv stop "$1" && _ok "stopped '$1'" || _error "failed to stop '$1'"
+}
+
+cmd_restart() {
+    _check_service_exists "$1"
+    _check_service_enabled "$1"
+    _sv restart "$1" && _ok "restarted '$1'" || _error "failed to restart '$1'"
+}
+
+cmd_reload() {
+    _check_service_exists "$1"
+    _check_service_enabled "$1"
+    _sv reload "$1" && _ok "reloaded '$1'" || _error "failed to reload '$1' (service may not support reload)"
+}
+
+cmd_enable() {
+    _check_service_exists "$1"
+    if [[ -L "$RUNSVDIR/$1" ]]; then
+        _warn "service '$1' is already enabled"
+        exit 0
+    fi
+    mkdir -p "$RUNSVDIR"
+    ln -s "$SVDIR/$1" "$RUNSVDIR/$1"
+    _ok "enabled '$1'"
+}
+
+cmd_disable() {
+    _check_service_exists "$1"
+    if [[ ! -L "$RUNSVDIR/$1" ]]; then
+        _warn "service '$1' is not enabled"
+        exit 0
+    fi
+    _sv stop "$1" 2>/dev/null
+    rm "$RUNSVDIR/$1"
+    _ok "disabled '$1'"
+}
+
+cmd_status() {
+    if [[ -n "$1" ]]; then
+        _check_service_exists "$1"
+        local out
+        out=$(_sv status "$1" 2>&1)
+        if echo "$out" | grep -q "run:"; then
+            echo -e "${GREEN}${out}${NC}"
+        else
+            echo -e "${RED}${out}${NC}"
+        fi
+        echo ""
+        if [[ -f "$LOG_FILE" ]]; then
+            _info "Recent log entries:"
+            grep -i "$1" "$LOG_FILE" | grep -i "error\|warn\|fail\|crit" | tail -10
+            [[ $? -ne 0 ]] && echo "  no errors found in log"
+        fi
+    else
+        if [[ $USER_MODE -eq 1 ]]; then
+            _info "Enabled user services:"
+        else
+            _info "Enabled services:"
+        fi
+        for svc in "$RUNSVDIR"/*/; do
+            [[ -d "$svc" ]] || continue
+            svc=$(basename "$svc")
+            _is_internal "$svc" && continue
+            local out
+            out=$(_sv status "$svc" 2>/dev/null)
+            if echo "$out" | grep -q "run:"; then
+                echo -e "  ${GREEN}[up]  ${NC} $svc"
+            else
+                echo -e "  ${RED}[down]${NC} $svc"
+            fi
+        done
+    fi
+}
+
+cmd_list() {
+    if [[ $USER_MODE -eq 1 ]]; then
+        _info "Available user services (in $SVDIR):"
+    else
+        _info "Available services:"
+    fi
+    [[ -d "$SVDIR" ]] || { _warn "service directory $SVDIR does not exist"; exit 0; }
+    for svc in "$SVDIR"/*/; do
+        [[ -d "$svc" ]] || continue
+        svc=$(basename "$svc")
+        _is_internal "$svc" && continue
+        if [[ -L "$RUNSVDIR/$svc" ]]; then
+            local out
+            out=$(_sv status "$svc" 2>/dev/null)
+            if echo "$out" | grep -q "run:"; then
+                echo -e "  ${GREEN}[enabled/up]  ${NC} $svc"
+            else
+                echo -e "  ${YELLOW}[enabled/down]${NC} $svc"
+            fi
+        else
+            echo -e "  ${RED}[disabled]    ${NC} $svc"
+        fi
+    done
+}
+
+# --- Usage --------------------------------------------------------------------
+
+usage() {
+    echo -e "${BOLD}rsv${NC} - runit service manager"
+    echo ""
+    echo -e "${BOLD}usage:${NC} rsv [--user] <command> [service]"
+    echo ""
+    echo -e "${BOLD}flags:${NC}"
+    echo "  --user              operate on user services (auto-set when not root)"
+    echo ""
+    echo -e "${BOLD}commands:${NC}"
+    echo "  init                start the user runsvdir supervisor (user mode only)"
+    echo "  start   <service>   start a service"
+    echo "  stop    <service>   stop a service"
+    echo "  restart <service>   restart a service"
+    echo "  reload  <service>   reload a service"
+    echo "  enable  <service>   enable a service"
+    echo "  disable <service>   disable a service"
+    echo "  status  [service]   show status of one or all enabled services"
+    echo "  list                list all available services and their state"
+    echo ""
+    echo -e "${BOLD}system paths (root):${NC}"
+    echo "  sv dir:   /etc/runit/sv"
+    echo "  run dir:  /etc/runit/runsvdir/default"
+    echo ""
+    echo -e "${BOLD}user paths:${NC}"
+    echo "  sv dir:   \${XDG_DATA_HOME}/sv          (~/.local/share/sv)"
+    echo "  run dir:  \${XDG_CONFIG_HOME}/runit/default  (~/.config/runit/default)"
+    echo ""
+    echo -e "${BOLD}commands requiring root (system mode):${NC} start stop restart reload enable disable"
+}
+
+# --- Dispatch -----------------------------------------------------------------
+
+CMD="$1"  # used by _check_service_exists for cross-mode hints
+
+if _needs_root "$1"; then
+    _check_root "$1"
+fi
+
+case "$1" in
+    init)     [[ $USER_MODE -eq 0 ]] && _error "'init' is only available in user mode" || cmd_init ;;
+    start)    [[ -z "$2" ]] && usage || cmd_start "$2" ;;
+    stop)     [[ -z "$2" ]] && usage || cmd_stop "$2" ;;
+    restart)  [[ -z "$2" ]] && usage || cmd_restart "$2" ;;
+    reload)   [[ -z "$2" ]] && usage || cmd_reload "$2" ;;
+    enable)   [[ -z "$2" ]] && usage || cmd_enable "$2" ;;
+    disable)  [[ -z "$2" ]] && usage || cmd_disable "$2" ;;
+    status)   cmd_status "$2" ;;
+    list)     cmd_list ;;
+    *)        usage ;;
+esac
