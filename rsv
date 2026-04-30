@@ -10,6 +10,10 @@ BLUE='\033[0;34m'
 BOLD='\033[1m'
 NC='\033[0m'
 
+if [[ -n "${NO_COLOR-}" ]]; then
+    RED='' GREEN='' YELLOW='' BLUE='' BOLD='' NC=''
+fi
+
 _info()    { echo -e "${BLUE}==>${NC} ${BOLD}$*${NC}"; }
 _ok()      { echo -e "${GREEN}ok${NC}: $*"; }
 _warn()    { echo -e "${YELLOW}warn${NC}: $*"; }
@@ -35,6 +39,31 @@ else
     SV_SOCK_DIR=""
     LOG_FILE="/var/log/everything/current"
 fi
+
+# Strip --now / --errors / --level from args and set flags
+NOW=0
+LOG_LEVEL=""
+_args=()
+_next_level=0
+for _a in "$@"; do
+    if [[ $_next_level -eq 1 ]]; then
+        LOG_LEVEL="${_a//,/|}"
+        _next_level=0
+    elif [[ "$_a" == "--now" ]]; then
+        NOW=1
+    elif [[ "$_a" == "--errors" ]]; then
+        LOG_LEVEL="error|warn|crit|fail"
+    elif [[ "$_a" == "--level" ]]; then
+        _next_level=1
+    elif [[ "$_a" == --level=* ]]; then
+        LOG_LEVEL="${_a#--level=}"
+        LOG_LEVEL="${LOG_LEVEL//,/|}"
+    else
+        _args+=("$_a")
+    fi
+done
+set -- "${_args[@]}"
+unset _args _a _next_level
 
 # --- Helpers ------------------------------------------------------------------
 
@@ -86,6 +115,10 @@ _check_service_enabled() {
 _is_internal() {
     [[ "$1" == "current" || "$1" == "supervise" || "$1" == ".supervisor" ]]
 }
+
+# Log level filter helpers (passthrough when LOG_LEVEL is unset)
+_lgrep()      { [[ -n "$LOG_LEVEL" ]] && grep -aiE "$LOG_LEVEL"                   || cat; }
+_lgrep_live() { [[ -n "$LOG_LEVEL" ]] && grep --line-buffered -aiE "$LOG_LEVEL"   || grep --line-buffered -a ''; }
 
 # sv wrapper: in user mode pass the full service path instead of just the name
 _sv() {
@@ -145,11 +178,13 @@ cmd_enable() {
     _check_service_exists "$1"
     if [[ -L "$RUNSVDIR/$1" ]]; then
         _warn "service '$1' is already enabled"
+        [[ $NOW -eq 1 ]] && { _sv start "$1" && _ok "started '$1'" || _error "failed to start '$1'"; }
         exit 0
     fi
     mkdir -p "$RUNSVDIR"
     ln -s "$SVDIR/$1" "$RUNSVDIR/$1"
     _ok "enabled '$1'"
+    [[ $NOW -eq 1 ]] && { _sv start "$1" && _ok "started '$1'" || _error "failed to start '$1'"; }
 }
 
 cmd_disable() {
@@ -161,6 +196,29 @@ cmd_disable() {
     _sv stop "$1" 2>/dev/null
     rm "$RUNSVDIR/$1"
     _ok "disabled '$1'"
+}
+
+cmd_logs() {
+    if [[ -n "$1" ]]; then
+        _check_service_exists "$1"
+        local log="$SVDIR/$1/log/current"
+        if [[ -f "$log" ]]; then
+            tail -f "$log" | _lgrep_live
+        elif [[ -f "$LOG_FILE" ]]; then
+            _warn "no per-service log at $log — falling back to global log (filtered)"
+            _info "tip: add a log/run script to your service to enable per-service logging"
+            tail -n 1000 "$LOG_FILE" | grep -av '\[sudo\]' | grep -ai "$1" | _lgrep | tail -10
+            _info "following new entries (Ctrl-C to stop)..."
+            tail -f "$LOG_FILE" | grep --line-buffered -av '\[sudo\]' | grep --line-buffered -ai "$1" | _lgrep_live
+        else
+            _error "no per-service log at $log and no global log at $LOG_FILE"
+        fi
+    else
+        if [[ ! -f "$LOG_FILE" ]]; then
+            _error "no global log at $LOG_FILE"
+        fi
+        tail -f "$LOG_FILE" | _lgrep_live
+    fi
 }
 
 cmd_status() {
@@ -176,7 +234,7 @@ cmd_status() {
         echo ""
         if [[ -f "$LOG_FILE" ]]; then
             _info "Recent log entries:"
-            grep -i "$1" "$LOG_FILE" | grep -i "error\|warn\|fail\|crit" | tail -10
+            grep -ai "$1" "$LOG_FILE" | grep -ai "error\|warn\|fail\|crit" | tail -10
             [[ $? -ne 0 ]] && echo "  no errors found in log"
         fi
     else
@@ -234,6 +292,9 @@ usage() {
     echo ""
     echo -e "${BOLD}flags:${NC}"
     echo "  --user              operate on user services (auto-set when not root)"
+    echo "  --now               with enable: also start the service immediately"
+    echo "  --errors            with logs: show only error/warn/crit/fail lines"
+    echo "  --level <levels>    with logs: filter by level e.g. --level error,warn"
     echo ""
     echo -e "${BOLD}commands:${NC}"
     echo "  init                start the user runsvdir supervisor (user mode only)"
@@ -245,14 +306,15 @@ usage() {
     echo "  disable <service>   disable a service"
     echo "  status  [service]   show status of one or all enabled services"
     echo "  list                list all available services and their state"
+    echo "  logs    [service]   tail logs for a service (or global log)"
     echo ""
     echo -e "${BOLD}system paths (root):${NC}"
     echo "  sv dir:   /etc/runit/sv"
     echo "  run dir:  /etc/runit/runsvdir/default"
     echo ""
     echo -e "${BOLD}user paths:${NC}"
-    echo "  sv dir:   \${XDG_DATA_HOME}/sv          (~/.local/share/sv)"
-    echo "  run dir:  \${XDG_CONFIG_HOME}/runit/default  (~/.config/runit/default)"
+    echo "  sv dir:   ~/.runit/sv          (override: \$RUNIT_SVDIR)"
+    echo "  run dir:  ~/.runit/runsvdir    (override: \$RUNIT_RUNSVDIR)"
     echo ""
     echo -e "${BOLD}commands requiring root (system mode):${NC} start stop restart reload enable disable"
 }
@@ -275,5 +337,6 @@ case "$1" in
     disable)  [[ -z "$2" ]] && usage || cmd_disable "$2" ;;
     status)   cmd_status "$2" ;;
     list)     cmd_list ;;
+    logs)     cmd_logs "$2" ;;
     *)        usage ;;
 esac

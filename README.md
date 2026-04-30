@@ -4,18 +4,19 @@ A friendly wrapper around runit's `sv` command, with system and user service sup
 
 ## Installation
 
-```sh
-sudo cp rsv /usr/local/bin/rsv
-chmod +x /usr/local/bin/rsv
+Run the install script as root (system-wide) or as your user (local):
 
-# fish completions
-cp rsv.fish ~/.config/fish/completions/rsv.fish
+```sh
+sudo ./Install.sh   # installs to /usr/local/bin, system completion dirs
+./Install.sh        # installs to ~/.local/bin, user completion dirs
 ```
+
+Both paths install shell completions for fish, bash, and zsh.
 
 ## Usage
 
 ```
-rsv [--user] <command> [service]
+rsv [--user] [--now] [--errors] [--level <levels>] <command> [service]
 ```
 
 System services require root. User services are selected automatically when not root, or explicitly with `--user`.
@@ -30,7 +31,17 @@ System services require root. User services are selected automatically when not 
 | `disable <service>` | disable a service |
 | `status [service]` | status of one or all enabled services |
 | `list` | list all available services and their state |
+| `logs [service]` | tail logs for a service, or the global log |
 | `init` | start the user runsvdir supervisor (user mode only) |
+
+### Flags
+
+| flag | description |
+|---|---|
+| `--user` | operate on user services (auto-set when not root) |
+| `--now` | with `enable`: also start the service immediately |
+| `--errors` | with `logs`: show only error/warn/crit/fail lines |
+| `--level <levels>` | with `logs`: filter by log level, e.g. `--level error,warn` |
 
 ## Examples
 
@@ -38,11 +49,15 @@ System services require root. User services are selected automatically when not 
 # system services
 sudo rsv status
 sudo rsv restart NetworkManager
+sudo rsv enable --now sshd
+sudo rsv logs NetworkManager
+sudo rsv logs NetworkManager --errors
+sudo rsv logs NetworkManager --level info,warn
 
 # user services
 rsv status
-rsv --user start pipewire
-rsv --user enable wireplumber
+rsv enable --now pipewire
+rsv logs syncthing
 ```
 
 If you run a command against the wrong mode, rsv will tell you:
@@ -75,3 +90,22 @@ Paths can be overridden with environment variables:
 | service definitions | `/etc/runit/sv` | `~/.runit/sv` |
 | enabled services | `/etc/runit/runsvdir/default` | `~/.runit/runsvdir` |
 | logs | `/var/log/everything/current` | `~/.runit/log/everything/current` |
+
+## Shell completions
+
+Completions for fish, bash, and zsh are included. The install script places them automatically. To load manually:
+
+```sh
+# fish (auto-loaded from this directory)
+cp rsv.fish ~/.config/fish/completions/rsv.fish
+
+# bash — add to ~/.bashrc
+source /path/to/rsv.bash
+
+# zsh — place in a directory on $fpath
+cp rsv.zsh /usr/share/zsh/site-functions/_rsv
+```
+
+## NO_COLOR
+
+rsv respects the [`NO_COLOR`](https://no-color.org) convention. Set `NO_COLOR=1` in your environment to disable all color output.

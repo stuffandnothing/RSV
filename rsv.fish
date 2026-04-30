@@ -1,6 +1,6 @@
 # rsv completions
 
-set -l commands start stop restart reload enable disable status list init
+set -l commands start stop restart reload enable disable status list logs init
 set -l user_svdir (test -n "$RUNIT_SVDIR"; and echo "$RUNIT_SVDIR"; or echo "$HOME/.runit/sv")
 set -l sys_svdir /etc/runit/sv
 
@@ -73,18 +73,24 @@ complete -c rsv -f -n "not __fish_seen_subcommand_from $commands" \
 complete -c rsv -f -n "not __fish_seen_subcommand_from $commands" \
     -a "list"    -d "list all services"
 complete -c rsv -f -n "not __fish_seen_subcommand_from $commands" \
+    -a "logs"    -d "tail service logs"
+complete -c rsv -f -n "not __fish_seen_subcommand_from $commands" \
     -a "init"    -d "start user runsvdir (user mode only)"
 
 # --- Service name completions ---
 
-# start/restart/reload/disable/status: complete enabled services
-complete -c rsv -f -n "__fish_seen_subcommand_from start restart reload disable status" \
+# start/restart/reload/stop/disable/status/logs: complete enabled services
+complete -c rsv -f -n "__fish_seen_subcommand_from start stop restart reload disable status logs" \
     -a "(__rsv_enabled_services)"
 
-# stop: complete enabled services
-complete -c rsv -f -n "__fish_seen_subcommand_from stop" \
-    -a "(__rsv_enabled_services)"
-
-# enable: complete only disabled services
+# enable: complete only disabled services, plus --now flag
 complete -c rsv -f -n "__fish_seen_subcommand_from enable" \
     -a "(__rsv_disabled_services)"
+complete -c rsv -f -n "__fish_seen_subcommand_from enable" \
+    -l now -d "also start the service immediately"
+
+# logs: level filter flags
+complete -c rsv -f -n "__fish_seen_subcommand_from logs" \
+    -l errors -d "show only error/warn/crit/fail lines"
+complete -c rsv -f -n "__fish_seen_subcommand_from logs" \
+    -l level -d "filter by level e.g. error,warn" -r
