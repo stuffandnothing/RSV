@@ -13,6 +13,7 @@ sudo ./Install.sh   # installs to /usr/local/bin, system completion dirs
 <details>
 <summary>Manual Installation </summary>
 if for some reason you dont like automatic?
+
 ### System-wide (as root)
 
 ~~~sh
