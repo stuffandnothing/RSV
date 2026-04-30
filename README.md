@@ -14,6 +14,7 @@ sudo ./Install.sh   # installs to /usr/local/bin, system completion dirs
 <summary>Manual Installation </summary>
 if for some reason you dont like automatic?
 ### System-wide (as root)
+
 ~~~sh
 install -Dm755 rsv      /usr/local/bin/rsv
 install -Dm644 rsv.bash /usr/share/bash-completion/completions/rsv
