@@ -1,7 +1,7 @@
 # rsv
 
 A friendly wrapper around runit's `sv` command, with system and user service support.
-
+I 
 ## Installation
 
 Run the install script as root (system-wide) or as your user (local):
@@ -10,7 +10,28 @@ Run the install script as root (system-wide) or as your user (local):
 sudo ./Install.sh   # installs to /usr/local/bin, system completion dirs
 ./Install.sh        # installs to ~/.local/bin, user completion dirs
 ```
+<details>
+<summary>Manual Installation </summary>
+if for some reason you dont like automatic?
+### System-wide (as root)
+~~~sh
+install -Dm755 rsv      /usr/local/bin/rsv
+install -Dm644 rsv.bash /usr/share/bash-completion/completions/rsv
+install -Dm644 rsv.fish /usr/share/fish/vendor_completions.d/rsv.fish
+install -Dm644 rsv.zsh  /usr/share/zsh/site-functions/_rsv
+~~~
 
+### User-local
+~~~sh
+install -m755 rsv      ~/.local/bin/rsv
+install -m644 rsv.bash ~/.local/share/bash-completion/completions/rsv
+install -m644 rsv.fish ~/.config/fish/completions/rsv.fish
+install -m644 rsv.zsh  ~/.local/share/zsh/site-functions/_rsv
+~~~
+
+> **Note:** For `sudo rsv` to work, system-wide installation is recommended.
+
+</details>
 Both paths install shell completions for fish, bash, and zsh.
 
 ## Usage
@@ -108,4 +129,4 @@ cp rsv.zsh /usr/share/zsh/site-functions/_rsv
 
 ## NO_COLOR
 
-rsv respects the [`NO_COLOR`](https://no-color.org) convention. Set `NO_COLOR=1` in your environment to disable all color output.
+rsv respects the [`NO_COLOR`](https://no-color.org) convention.
