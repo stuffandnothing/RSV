@@ -18,6 +18,8 @@ _rsv() {
         'list:list all services'
         'logs:tail service logs'
         'init:start user runsvdir (user mode only)'
+        'doctor:check for common runit problems'
+        'log-setup:add a log service to an existing service'
     )
 
     local user_mode=0
@@ -68,6 +70,11 @@ _rsv() {
                 start|stop|restart|reload|disable|status|logs)
                     local -a svcs
                     svcs=($(_rsv_enabled))
+                    _values 'service' $svcs
+                    ;;
+                log-setup)
+                    local -a svcs
+                    svcs=($(_rsv_all))
                     _values 'service' $svcs
                     ;;
             esac

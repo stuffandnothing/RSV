@@ -1,23 +1,33 @@
 # rsv completions
 
-set -l commands start stop restart reload enable disable status list logs init
-set -l user_svdir (test -n "$RUNIT_SVDIR"; and echo "$RUNIT_SVDIR"; or echo "$HOME/.runit/sv")
-set -l sys_svdir /etc/runit/sv
-
-# Helper: is --user flag present?
-# Completions always run as the invoking user, so id -u is never 0 here.
-# Instead check whether the commandline starts with sudo to pick system mode.
+# Helper: is --user flag present in the current commandline?
 function __rsv_user_mode
-    __fish_seen_subcommand_from --user
+    contains -- --user (commandline -opc)
 end
 
 # Helper: effective sv dir based on mode
 function __rsv_svdir
     if __rsv_user_mode
-        echo $user_svdir
+        echo (test -n "$RUNIT_SVDIR"; and echo "$RUNIT_SVDIR"; or echo "$HOME/.runit/sv")
     else
-        echo $sys_svdir
+        echo /etc/runit/sv
     end
+end
+
+# Helper: is a specific subcommand active?
+function __rsv_cmd_is
+    contains -- $argv[1] (commandline -opc)
+end
+
+# Helper: no rsv subcommand seen yet
+function __rsv_no_cmd
+    set -l tokens (commandline -opc)
+    for cmd in start stop restart reload enable disable status list logs edit new init doctor log-setup
+        if contains -- $cmd $tokens
+            return 1
+        end
+    end
+    return 0
 end
 
 # Helper: list all services (excluding internals)
@@ -31,12 +41,12 @@ end
 # Helper: list only enabled services (have a symlink in runsvdir)
 function __rsv_enabled_services
     if __rsv_user_mode
-        set -l rundir (test -n "$RUNIT_RUNSVDIR"; and echo "$RUNIT_RUNSVDIR"; or echo "$HOME/.runit/runsvdir")
+        set -l rundir (test -n "$RUNIT_RUNSVDIR"; and echo $RUNIT_RUNSVDIR; or echo "$HOME/.runit/runsvdir")
         if test -d $rundir
             ls $rundir | grep -v 'current\|supervise\|\.supervisor'
         end
     else
-        ls /etc/runit/runsvdir/default | grep -v 'current\|supervise'
+        ls /etc/runit/runsvdir/default 2>/dev/null | grep -v 'current\|supervise'
     end
 end
 
@@ -51,46 +61,60 @@ function __rsv_disabled_services
     end
 end
 
-# --- Flag ---
-complete -c rsv -f -n "not __fish_seen_subcommand_from $commands" \
-    -a "--user" -d "operate on user services"
+# --- Flags (before any subcommand) ---
+complete -c rsv -f -n __rsv_no_cmd -a "--user" -d "operate on user services"
+complete -c rsv -f -n "__rsv_no_cmd; and not contains -- --as-user (commandline -opc)" \
+    -a "--as-user" -d "manage another user's services"
+complete -c rsv -f -n "test (commandline -opc)[-1] = --as-user" \
+    -a "(getent passwd | cut -d: -f1)"
 
 # --- Subcommands ---
-complete -c rsv -f -n "not __fish_seen_subcommand_from $commands" \
-    -a "start"   -d "start a service"
-complete -c rsv -f -n "not __fish_seen_subcommand_from $commands" \
-    -a "stop"    -d "stop a service"
-complete -c rsv -f -n "not __fish_seen_subcommand_from $commands" \
-    -a "restart" -d "restart a service"
-complete -c rsv -f -n "not __fish_seen_subcommand_from $commands" \
-    -a "reload"  -d "reload a service"
-complete -c rsv -f -n "not __fish_seen_subcommand_from $commands" \
-    -a "enable"  -d "enable a service"
-complete -c rsv -f -n "not __fish_seen_subcommand_from $commands" \
-    -a "disable" -d "disable a service"
-complete -c rsv -f -n "not __fish_seen_subcommand_from $commands" \
-    -a "status"  -d "show service status"
-complete -c rsv -f -n "not __fish_seen_subcommand_from $commands" \
-    -a "list"    -d "list all services"
-complete -c rsv -f -n "not __fish_seen_subcommand_from $commands" \
-    -a "logs"    -d "tail service logs"
-complete -c rsv -f -n "not __fish_seen_subcommand_from $commands" \
-    -a "init"    -d "start user runsvdir (user mode only)"
+complete -c rsv -f -n __rsv_no_cmd -a "start"   -d "start a service"
+complete -c rsv -f -n __rsv_no_cmd -a "stop"    -d "stop a service"
+complete -c rsv -f -n __rsv_no_cmd -a "restart" -d "restart a service"
+complete -c rsv -f -n __rsv_no_cmd -a "reload"  -d "reload a service"
+complete -c rsv -f -n __rsv_no_cmd -a "enable"  -d "enable a service"
+complete -c rsv -f -n __rsv_no_cmd -a "disable" -d "disable a service"
+complete -c rsv -f -n __rsv_no_cmd -a "status"  -d "show service status"
+complete -c rsv -f -n __rsv_no_cmd -a "list"    -d "list all services"
+complete -c rsv -f -n __rsv_no_cmd -a "logs"    -d "tail service logs"
+complete -c rsv -f -n __rsv_no_cmd -a "edit"    -d "open run script in \$EDITOR"
+complete -c rsv -f -n __rsv_no_cmd -a "new"     -d "scaffold a new service"
+complete -c rsv -f -n __rsv_no_cmd -a "init"      -d "start user runsvdir (user mode only)"
+complete -c rsv -f -n __rsv_no_cmd -a "doctor"    -d "check for common runit problems"
+complete -c rsv -f -n __rsv_no_cmd -a "log-setup" -d "add a log service to an existing service"
 
 # --- Service name completions ---
 
-# start/restart/reload/stop/disable/status/logs: complete enabled services
-complete -c rsv -f -n "__fish_seen_subcommand_from start stop restart reload disable status logs" \
-    -a "(__rsv_enabled_services)"
+# start/stop/restart/reload/disable/status/logs: enabled services
+complete -c rsv -f -n "__rsv_cmd_is start"   -a "(__rsv_enabled_services)"
+complete -c rsv -f -n "__rsv_cmd_is stop"    -a "(__rsv_enabled_services)"
+complete -c rsv -f -n "__rsv_cmd_is restart" -a "(__rsv_enabled_services)"
+complete -c rsv -f -n "__rsv_cmd_is reload"  -a "(__rsv_enabled_services)"
+complete -c rsv -f -n "__rsv_cmd_is disable" -a "(__rsv_enabled_services)"
+complete -c rsv -f -n "__rsv_cmd_is status"  -a "(__rsv_enabled_services)"
+complete -c rsv -f -n "__rsv_cmd_is logs"    -a "(__rsv_enabled_services)"
 
-# enable: complete only disabled services, plus --now flag
-complete -c rsv -f -n "__fish_seen_subcommand_from enable" \
+# edit: all services (enabled or not)
+complete -c rsv -f -n "__rsv_cmd_is edit"    -a "(__rsv_all_services)"
+
+# enable: disabled services + --now (only offer --now if not already present)
+complete -c rsv -f -n "__rsv_cmd_is enable" \
     -a "(__rsv_disabled_services)"
-complete -c rsv -f -n "__fish_seen_subcommand_from enable" \
-    -l now -d "also start the service immediately"
+complete -c rsv -f -n "__rsv_cmd_is enable; and not contains -- --now (commandline -opc)" \
+    -a "--now" -d "also start the service immediately"
 
-# logs: level filter flags
-complete -c rsv -f -n "__fish_seen_subcommand_from logs" \
-    -l errors -d "show only error/warn/crit/fail lines"
-complete -c rsv -f -n "__fish_seen_subcommand_from logs" \
-    -l level -d "filter by level e.g. error,warn" -r
+# new: --log flag (only if not already present)
+complete -c rsv -f -n "__rsv_cmd_is new; and not contains -- --log (commandline -opc)" \
+    -a "--log" -d "also scaffold a log service"
+
+# log-setup: all services
+complete -c rsv -f -n "__rsv_cmd_is log-setup" -a "(__rsv_all_services)"
+
+# logs: level filter flags (only if not already present)
+complete -c rsv -f -n "__rsv_cmd_is logs; and not contains -- --errors (commandline -opc)" \
+    -a "--errors" -d "show only error/warn/crit/fail lines"
+complete -c rsv -f -n "__rsv_cmd_is logs; and not contains -- --level (commandline -opc)" \
+    -a "--level"  -d "filter by level e.g. error,warn"
+complete -c rsv -f -n "__rsv_cmd_is logs; and not contains -- --lines (commandline -opc)" \
+    -a "--lines"  -d "show last N matching lines (default 10)"

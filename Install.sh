@@ -17,7 +17,7 @@ if [[ $EUID -ne 0 ]]; then
     install -m644 rsv.bash ~/.local/share/bash-completion/completions/rsv
     install -m644 rsv.fish ~/.config/fish/completions/rsv.fish
     install -m644 rsv.zsh  ~/.local/share/zsh/site-functions/_rsv
-    echo "Installed. Make sure ~/.local/bin is in your PATH."
+    echo "  Installed. Make sure ~/.local/bin is in your PATH."
 else
     read -rp "  Running as root — will install to:
   /usr/local/bin/rsv
@@ -31,5 +31,5 @@ else
     install -Dm644 rsv.bash /usr/share/bash-completion/completions/rsv
     install -Dm644 rsv.fish /usr/share/fish/vendor_completions.d/rsv.fish
     install -Dm644 rsv.zsh  /usr/share/zsh/site-functions/_rsv
-    echo "Installed."
+    echo "  Installed."
 fi

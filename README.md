@@ -1,7 +1,15 @@
-# rsv
+# Rsv
 
 A friendly wrapper around runit's `sv` command, with system and user service support.
-I 
+<details>
+<summary>Why? </summary>
+I Dont hate myself and this is a nice wrapper,
+
+The Inspiration i had was openrc rc-service and rc-update. \
+And i hate doing  "ln -s /etc/runitg/sv/service_name /run/runit/service", \
+That gets annoying fast and i dont think about it with this.
+</details>
+
 ## Installation
 
 Run the install script as root (system-wide) or as your user (local):
@@ -12,7 +20,7 @@ sudo ./Install.sh   # installs to /usr/local/bin, system completion dirs
 ```
 <details>
 <summary>Manual Installation </summary>
-if for some reason you dont like automatic?
+If for some reason you dont like automatic?
 
 ### System-wide (as root)
 

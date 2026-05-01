@@ -13,12 +13,26 @@ NC='\033[0m'
 if [[ -n "${NO_COLOR-}" ]]; then
     RED='' GREEN='' YELLOW='' BLUE='' BOLD='' NC=''
 fi
-
+_hint() {
+    local msg="${1:-}"
+    [[ -n "$msg" ]] && echo -e "${YELLOW}hint${NC}: ${msg}"
+}
 _info()    { echo -e "${BLUE}==>${NC} ${BOLD}$*${NC}"; }
 _ok()      { echo -e "${GREEN}ok${NC}: $*"; }
 _warn()    { echo -e "${YELLOW}warn${NC}: $*"; }
-_error()   { echo -e "${RED}error${NC}: $*"; exit 1; }
-
+_error() {
+    local msg="${1:-an unknown error occurred}"
+    local no_exit="${2:-}"
+    echo -e "${RED}error${NC}: ${msg}"
+    [[ -z "$no_exit" ]] && exit 1
+}
+_error_hint() {
+    local msg="${1:-an unknown error occurred}"
+    local hint="${2:-}"
+    echo -e "${RED}error${NC}: ${msg}"
+    _hint "$hint"
+    exit 1
+}
 # --- Mode selection -----------------------------------------------------------
 
 USER_MODE=0
@@ -33,6 +47,7 @@ if [[ $USER_MODE -eq 1 ]]; then
     SVDIR="${RUNIT_SVDIR:-$HOME/.runit/sv}"
     RUNSVDIR="${RUNIT_RUNSVDIR:-$HOME/.runit/runsvdir}"
     LOG_FILE="${RUNIT_LOG:-$HOME/.runit/log/everything/current}"
+    ROOT_SVDIR="/etc/runit/sv"
 else
     SVDIR="/etc/runit/sv"
     RUNSVDIR="/etc/runit/runsvdir/default"
@@ -40,34 +55,80 @@ else
     LOG_FILE="/var/log/everything/current"
 fi
 
-# Strip --now / --errors / --level from args and set flags
+# Strip flag args and set variables
 NOW=0
 LOG_LEVEL=""
+LOG_LINES=10
+WITH_LOG=0
+AS_USER=""
 _args=()
 _next_level=0
+_next_as_user=0
+_next_lines=0
 for _a in "$@"; do
     if [[ $_next_level -eq 1 ]]; then
         LOG_LEVEL="${_a//,/|}"
         _next_level=0
+    elif [[ $_next_as_user -eq 1 ]]; then
+        AS_USER="$_a"
+        _next_as_user=0
+    elif [[ $_next_lines -eq 1 ]]; then
+        LOG_LINES="$_a"
+        _next_lines=0
     elif [[ "$_a" == "--now" ]]; then
         NOW=1
     elif [[ "$_a" == "--errors" ]]; then
         LOG_LEVEL="error|warn|crit|fail"
+    elif [[ "$_a" == "--log" ]]; then
+        WITH_LOG=1
     elif [[ "$_a" == "--level" ]]; then
         _next_level=1
     elif [[ "$_a" == --level=* ]]; then
         LOG_LEVEL="${_a#--level=}"
         LOG_LEVEL="${LOG_LEVEL//,/|}"
+    elif [[ "$_a" == "--lines" ]]; then
+        _next_lines=1
+    elif [[ "$_a" == --lines=* ]]; then
+        LOG_LINES="${_a#--lines=}"
+    elif [[ "$_a" == "--as-user" ]]; then
+        _next_as_user=1
+    elif [[ "$_a" == --as-user=* ]]; then
+        AS_USER="${_a#--as-user=}"
     else
         _args+=("$_a")
     fi
 done
 set -- "${_args[@]}"
-unset _args _a _next_level
+unset _args _a _next_level _next_as_user _next_lines
+
+# Apply --as-user: validate, override paths, check access
+if [[ -n "$AS_USER" ]]; then
+    _as_home=$(getent passwd "$AS_USER" 2>/dev/null | cut -d: -f6)
+    [[ -z "$_as_home" ]] && _error "user '$AS_USER' not found"
+
+    USER_MODE=1
+    SVDIR="${_as_home}/.runit/sv"
+    RUNSVDIR="${_as_home}/.runit/runsvdir"
+    LOG_FILE="${_as_home}/.runit/log/everything/current"
+
+    _as_ok=1
+    for _chk in "$SVDIR" "$RUNSVDIR"; do
+        _d="$_chk"
+        while [[ -n "$_d" && "$_d" != "/" && ! -e "$_d" ]]; do
+            _d=$(dirname "$_d")
+        done
+        [[ ! -r "$_d" || ! -w "$_d" ]] && _as_ok=0
+    done
+    if [[ $_as_ok -eq 0 ]]; then
+        _error_hint "no read/write access to $AS_USER's runit directories" \
+            "try running as root or ensure you have permission"
+    fi
+    unset _as_home _as_ok _chk _d
+fi
 
 # --- Helpers ------------------------------------------------------------------
 
-_NEEDS_ROOT=(start stop restart enable disable reload)
+_NEEDS_ROOT=(start stop restart enable disable reload edit new log-setup)
 
 _check_root() {
     if [[ $EUID -ne 0 ]]; then
@@ -86,32 +147,29 @@ _needs_root() {
 
 _check_service_exists() {
     if [[ ! -d "$SVDIR/$1" ]]; then
-        # Check if the service exists in the other mode and suggest the right invocation
         if [[ $USER_MODE -eq 1 ]]; then
             local sys_svdir="/etc/runit/sv"
             if [[ -d "$sys_svdir/$1" ]]; then
-                echo -e "${RED}error${NC}: service '$1' not found in $SVDIR"
-                echo -e "${YELLOW}hint${NC}:  did you mean: ${BOLD}sudo rsv $CMD $1${NC}"
-                exit 1
+                _error_hint "service '$1' not found in $SVDIR" \
+                    "did you mean: sudo rsv $CMD $1"
             fi
         else
             local user_svdir="${RUNIT_SVDIR:-$HOME/.runit/sv}"
             if [[ -d "$user_svdir/$1" ]]; then
-                echo -e "${RED}error${NC}: service '$1' not found in $SVDIR"
-                echo -e "${YELLOW}hint${NC}:  did you mean: ${BOLD}rsv --user $CMD $1${NC}"
-                exit 1
+                _error_hint "service '$1' not found in $SVDIR" \
+                    "did you mean: rsv --user $CMD $1"
             fi
         fi
-        _error "service '$1' not found in $SVDIR"
+        _error_hint "service '$1' not found in $SVDIR" \
+            "run 'rsv list' to see available services"
     fi
 }
 
 _check_service_enabled() {
     if [[ ! -L "$RUNSVDIR/$1" ]]; then
-        _error "service '$1' is not enabled"
+        _error_hint "service '$1' is not enabled" "run rsv enable --now $1 to enable and start it"
     fi
 }
-
 _is_internal() {
     [[ "$1" == "current" || "$1" == "supervise" || "$1" == ".supervisor" ]]
 }
@@ -128,6 +186,15 @@ _sv() {
     else
         sv "$@"
     fi
+}
+
+# When sudo strips $EDITOR, look it up from the real user's login shell
+_editor() {
+    local ed="${EDITOR:-${VISUAL:-}}"
+    if [[ -z "$ed" && -n "$SUDO_USER" ]]; then
+        ed=$(su - "$SUDO_USER" -c 'printenv EDITOR 2>/dev/null || printenv VISUAL 2>/dev/null' 2>/dev/null)
+    fi
+    echo "${ed:-vi}"
 }
 
 # --- User-mode supervisor management ------------------------------------------
@@ -198,6 +265,151 @@ cmd_disable() {
     _ok "disabled '$1'"
 }
 
+cmd_edit() {
+    _check_service_exists "$1"
+    local script="$SVDIR/$1/run"
+    [[ ! -f "$script" ]] && _error "no run script at $script"
+    "$(_editor)" "$script"
+}
+
+cmd_new() {
+    local name="$1"
+    [[ -d "$SVDIR/$name" ]] && _error "service '$name' already exists in $SVDIR"
+    mkdir -p "$SVDIR/$name"
+    cat > "$SVDIR/$name/run" << 'RUNEOF'
+#!/bin/sh
+exec /usr/bin/COMMAND 2>&1
+RUNEOF
+    chmod +x "$SVDIR/$name/run"
+    _ok "created '$name' at $SVDIR/$name/run"
+
+    if [[ $WITH_LOG -eq 1 ]]; then
+        local logdir="$SVDIR/$name/log"
+        if [[ $USER_MODE -eq 1 ]]; then
+            local logdest="$HOME/.runit/log/$name"
+        else
+            local logdest="/var/log/$name"
+        fi
+        mkdir -p "$logdir" "$logdest"
+        cat > "$logdir/run" << LOGEOF
+#!/bin/sh
+exec svlogd -tt $logdest
+LOGEOF
+        chmod +x "$logdir/run"
+        _ok "created log service → $logdest"
+    fi
+
+    _info "edit the run script:  rsv edit $name"
+    _info "enable when ready:    rsv enable $name"
+}
+
+cmd_doctor() {
+    local issues=0
+
+    # Check supervisor is running
+    if [[ $USER_MODE -eq 1 ]]; then
+        if ! pgrep -u "$USER" -f "runsvdir.*$RUNSVDIR" >/dev/null 2>&1; then
+            echo -e "  ${RED}[fail]${NC} user runsvdir is not running (start with: rsv --user init)"
+            (( issues++ ))
+        else
+            echo -e "  ${GREEN}[ok]${NC}   user runsvdir is running"
+        fi
+    else
+        if ! sv status /run/runit/stopit >/dev/null 2>&1 && ! pgrep -x runsvdir >/dev/null 2>&1; then
+            echo -e "  ${YELLOW}[warn]${NC} cannot verify system runsvdir (check your init)"
+        else
+            echo -e "  ${GREEN}[ok]${NC}   system runsvdir appears running"
+        fi
+    fi
+
+    # Check for dangling symlinks in RUNSVDIR
+    if [[ -d "$RUNSVDIR" ]]; then
+        for link in "$RUNSVDIR"/*/; do
+            [[ -L "${link%/}" ]] || continue
+            local name
+            name=$(basename "${link%/}")
+            _is_internal "$name" && continue
+            if [[ ! -d "$RUNSVDIR/$name" ]]; then
+                echo -e "  ${RED}[fail]${NC} dangling symlink: $name → $(readlink "$RUNSVDIR/$name") (target missing)"
+                (( issues++ ))
+            fi
+        done
+        # Also catch non-trailing-slash symlinks
+        for link in "$RUNSVDIR"/*; do
+            [[ -L "$link" ]] || continue
+            local name
+            name=$(basename "$link")
+            _is_internal "$name" && continue
+            if [[ ! -e "$link" ]]; then
+                echo -e "  ${RED}[fail]${NC} dangling symlink: $name → $(readlink "$link") (target missing)"
+                (( issues++ ))
+            fi
+        done
+    fi
+
+    # Check each enabled service for missing/non-executable run script and down state
+    if [[ -d "$RUNSVDIR" ]]; then
+        for link in "$RUNSVDIR"/*; do
+            [[ -L "$link" && -e "$link" ]] || continue
+            local name
+            name=$(basename "$link")
+            _is_internal "$name" && continue
+
+            local run="$SVDIR/$name/run"
+            if [[ ! -f "$run" ]]; then
+                echo -e "  ${RED}[fail]${NC} $name: missing run script at $run"
+                (( issues++ ))
+            elif [[ ! -x "$run" ]]; then
+                echo -e "  ${RED}[fail]${NC} $name: run script is not executable ($run)"
+                (( issues++ ))
+            fi
+
+            local out
+            out=$(_sv status "$name" 2>/dev/null)
+            if echo "$out" | grep -q "run:"; then
+                : # up, already covered by run script check
+            else
+                echo -e "  ${YELLOW}[warn]${NC} $name: service is down"
+            fi
+        done
+    fi
+
+    if [[ $issues -eq 0 ]]; then
+        _ok "no issues found"
+    else
+        echo ""
+        _warn "$issues issue(s) found"
+    fi
+}
+
+cmd_log_setup() {
+    local name="$1"
+    _check_service_exists "$name"
+
+    local logdir="$SVDIR/$name/log"
+    if [[ -f "$logdir/run" ]]; then
+        _warn "log service already exists at $logdir/run"
+        exit 0
+    fi
+
+    local logdest
+    if [[ $USER_MODE -eq 1 ]]; then
+        logdest="$HOME/.runit/log/$name"
+    else
+        logdest="/var/log/$name"
+    fi
+
+    mkdir -p "$logdir" "$logdest"
+    cat > "$logdir/run" << LOGEOF
+#!/bin/sh
+exec svlogd -tt $logdest
+LOGEOF
+    chmod +x "$logdir/run"
+    _ok "created log service for '$name'"
+    _ok "logs will go to: $logdest"
+    _info "restart the service to activate logging: rsv restart $name"
+}
+
 cmd_logs() {
     if [[ -n "$1" ]]; then
         _check_service_exists "$1"
@@ -207,7 +419,7 @@ cmd_logs() {
         elif [[ -f "$LOG_FILE" ]]; then
             _warn "no per-service log at $log — falling back to global log (filtered)"
             _info "tip: add a log/run script to your service to enable per-service logging"
-            tail -n 1000 "$LOG_FILE" | grep -av '\[sudo\]' | grep -ai "$1" | _lgrep | tail -10
+            tail -n "$((LOG_LINES * 100))" "$LOG_FILE" | grep -av '\[sudo\]' | grep -ai "$1" | _lgrep | tail -"$LOG_LINES"
             _info "following new entries (Ctrl-C to stop)..."
             tail -f "$LOG_FILE" | grep --line-buffered -av '\[sudo\]' | grep --line-buffered -ai "$1" | _lgrep_live
         else
@@ -224,6 +436,7 @@ cmd_logs() {
 cmd_status() {
     if [[ -n "$1" ]]; then
         _check_service_exists "$1"
+        _check_service_enabled "$1"
         local out
         out=$(_sv status "$1" 2>&1)
         if echo "$out" | grep -q "run:"; then
@@ -292,9 +505,12 @@ usage() {
     echo ""
     echo -e "${BOLD}flags:${NC}"
     echo "  --user              operate on user services (auto-set when not root)"
+    echo "  --as-user <user>    manage another user's services (requires r/w access)"
     echo "  --now               with enable: also start the service immediately"
     echo "  --errors            with logs: show only error/warn/crit/fail lines"
     echo "  --level <levels>    with logs: filter by level e.g. --level error,warn"
+    echo "  --lines <N>         with logs: show last N matching lines (default 10)"
+    echo "  --log               with new: also scaffold a log service"
     echo ""
     echo -e "${BOLD}commands:${NC}"
     echo "  init                start the user runsvdir supervisor (user mode only)"
@@ -307,6 +523,10 @@ usage() {
     echo "  status  [service]   show status of one or all enabled services"
     echo "  list                list all available services and their state"
     echo "  logs    [service]   tail logs for a service (or global log)"
+    echo "  edit    <service>   open the service run script in \$EDITOR"
+    echo "  new     <service>   scaffold a new service (--log to include log service)"
+    echo "  doctor              check for common runit configuration problems"
+    echo "  log-setup <service> add a svlogd log service to an existing service"
     echo ""
     echo -e "${BOLD}system paths (root):${NC}"
     echo "  sv dir:   /etc/runit/sv"
@@ -338,5 +558,9 @@ case "$1" in
     status)   cmd_status "$2" ;;
     list)     cmd_list ;;
     logs)     cmd_logs "$2" ;;
-    *)        usage ;;
+    edit)      [[ -z "$2" ]] && usage || cmd_edit "$2" ;;
+    new)       [[ -z "$2" ]] && usage || cmd_new "$2" ;;
+    doctor)    cmd_doctor ;;
+    log-setup) [[ -z "$2" ]] && usage || cmd_log_setup "$2" ;;
+    *)         usage ;;
 esac
