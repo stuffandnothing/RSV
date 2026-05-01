@@ -5,8 +5,7 @@ A friendly wrapper around runit's `sv` command, with system and user service sup
 <details>
 <summary>Why?</summary>
 
-I don't hate myself and this is a nice wrapper.
-
+I don't hate myself and this is a nice wrapper. \
 The inspiration was OpenRC's `rc-service` and `rc-update`.
 I hate doing `ln -s /etc/runit/sv/service_name /run/runit/service` — that gets annoying fast, and I don't have to think about it with this.
 </details>
@@ -70,8 +69,11 @@ System services require root. User services are selected automatically when not 
 | `new <service>` | scaffold a new service |
 | `init` | start the user runsvdir supervisor (user mode only) |
 | `doctor` | check for common runit configuration problems |
+| `once <service>` | run a service once without supervision |
+| `watch [service]` | auto-refreshing status display |
 | `log-setup <service>` | add a svlogd log service to an existing service |
 | `log-remove <service>` | remove the svlogd log service from a service |
+| `finish-setup <service>` | scaffold a finish script (runs on service exit) |
 
 ### Flags
 
