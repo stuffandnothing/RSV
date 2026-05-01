@@ -22,7 +22,7 @@ end
 # Helper: no rsv subcommand seen yet
 function __rsv_no_cmd
     set -l tokens (commandline -opc)
-    for cmd in start stop restart reload enable disable status list logs edit new init doctor log-setup log-remove
+    for cmd in start stop restart reload enable disable status list logs edit new init once watch doctor log-setup log-remove finish-setup
         if contains -- $cmd $tokens
             return 1
         end
@@ -81,9 +81,12 @@ complete -c rsv -f -n __rsv_no_cmd -a "logs"    -d "tail service logs"
 complete -c rsv -f -n __rsv_no_cmd -a "edit"    -d "open run script in \$EDITOR"
 complete -c rsv -f -n __rsv_no_cmd -a "new"     -d "scaffold a new service"
 complete -c rsv -f -n __rsv_no_cmd -a "init"      -d "start user runsvdir (user mode only)"
-complete -c rsv -f -n __rsv_no_cmd -a "doctor"    -d "check for common runit problems"
-complete -c rsv -f -n __rsv_no_cmd -a "log-setup"  -d "add a log service to an existing service"
-complete -c rsv -f -n __rsv_no_cmd -a "log-remove" -d "remove the log service from a service"
+complete -c rsv -f -n __rsv_no_cmd -a "once"         -d "run a service once without supervision"
+complete -c rsv -f -n __rsv_no_cmd -a "watch"        -d "auto-refreshing status"
+complete -c rsv -f -n __rsv_no_cmd -a "doctor"       -d "check for common runit problems"
+complete -c rsv -f -n __rsv_no_cmd -a "log-setup"    -d "add a log service to an existing service"
+complete -c rsv -f -n __rsv_no_cmd -a "log-remove"   -d "remove the log service from a service"
+complete -c rsv -f -n __rsv_no_cmd -a "finish-setup" -d "scaffold a finish script for a service"
 
 # --- Service name completions ---
 
@@ -109,9 +112,14 @@ complete -c rsv -f -n "__rsv_cmd_is enable; and not contains -- --now (commandli
 complete -c rsv -f -n "__rsv_cmd_is new; and not contains -- --log (commandline -opc)" \
     -a "--log" -d "also scaffold a log service"
 
-# log-setup / log-remove: all services
-complete -c rsv -f -n "__rsv_cmd_is log-setup"  -a "(__rsv_all_services)"
-complete -c rsv -f -n "__rsv_cmd_is log-remove" -a "(__rsv_all_services)"
+# once / watch: enabled services
+complete -c rsv -f -n "__rsv_cmd_is once"  -a "(__rsv_enabled_services)"
+complete -c rsv -f -n "__rsv_cmd_is watch" -a "(__rsv_enabled_services)"
+
+# log-setup / log-remove / finish-setup: all services
+complete -c rsv -f -n "__rsv_cmd_is log-setup"    -a "(__rsv_all_services)"
+complete -c rsv -f -n "__rsv_cmd_is log-remove"   -a "(__rsv_all_services)"
+complete -c rsv -f -n "__rsv_cmd_is finish-setup" -a "(__rsv_all_services)"
 
 # logs: level filter flags (only if not already present)
 complete -c rsv -f -n "__rsv_cmd_is logs; and not contains -- --errors (commandline -opc)" \

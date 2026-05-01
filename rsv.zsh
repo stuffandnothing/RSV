@@ -20,9 +20,12 @@ _rsv() {
         'edit:open run script in $EDITOR'
         'new:scaffold a new service'
         'init:start user runsvdir (user mode only)'
+        'once:run a service once without supervision'
+        'watch:auto-refreshing status'
         'doctor:check for common runit problems'
         'log-setup:add a log service to an existing service'
         'log-remove:remove the log service from a service'
+        'finish-setup:scaffold a finish script for a service'
     )
 
     local user_mode=0
@@ -83,7 +86,12 @@ _rsv() {
                         '--lines[number of lines to show]:N:' \
                         '*: :(($(_rsv_enabled)))'
                     ;;
-                edit|log-setup|log-remove)
+                once|watch)
+                    local -a svcs
+                    svcs=($(_rsv_enabled))
+                    _values 'service' $svcs
+                    ;;
+                edit|log-setup|log-remove|finish-setup)
                     local -a svcs
                     svcs=($(_rsv_all))
                     _values 'service' $svcs

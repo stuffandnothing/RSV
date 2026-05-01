@@ -10,9 +10,21 @@ BLUE='\033[0;34m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-if [[ -n "${NO_COLOR-}" ]]; then
+_disable_color=0
+[[ -n "${NO_COLOR-}" ]] && _disable_color=1
+[[ ! -t 1 ]] && _disable_color=1
+if [[ $_disable_color -eq 0 && -n "$SUDO_USER" ]]; then
+    # sudo strips NO_COLOR — read it from the invoking shell's /proc environ
+    _parent_pid=$(awk '/^PPid:/{print $2}' /proc/$PPID/status 2>/dev/null)
+    if [[ -n "$_parent_pid" ]] && tr '\0' '\n' < /proc/$_parent_pid/environ 2>/dev/null | grep -q '^NO_COLOR='; then
+        _disable_color=1
+    fi
+    unset _parent_pid
+fi
+if [[ $_disable_color -eq 1 ]]; then
     RED='' GREEN='' YELLOW='' BLUE='' BOLD='' NC=''
 fi
+unset _disable_color
 _hint() {
     local msg="${1:-}"
     [[ -n "$msg" ]] && echo -e "${YELLOW}hint${NC}: ${msg}"
@@ -128,7 +140,7 @@ fi
 
 # --- Helpers ------------------------------------------------------------------
 
-_NEEDS_ROOT=(start stop restart enable disable reload edit new log-setup log-remove)
+_NEEDS_ROOT=(start stop restart enable disable reload edit new once log-setup log-remove finish-setup)
 
 _check_root() {
     if [[ $EUID -ne 0 ]]; then
@@ -154,7 +166,9 @@ _check_service_exists() {
                     "did you mean: sudo rsv $CMD $1"
             fi
         else
-            local user_svdir="${RUNIT_SVDIR:-$HOME/.runit/sv}"
+            local _uhome
+            _uhome=$(getent passwd "${SUDO_USER:-$USER}" 2>/dev/null | cut -d: -f6)
+            local user_svdir="${RUNIT_SVDIR:-${_uhome:-$HOME}/.runit/sv}"
             if [[ -d "$user_svdir/$1" ]]; then
                 _error_hint "service '$1' not found in $SVDIR" \
                     "did you mean: rsv --user $CMD $1"
@@ -177,6 +191,21 @@ _is_internal() {
 # Log level filter helpers (passthrough when LOG_LEVEL is unset)
 _lgrep()      { [[ -n "$LOG_LEVEL" ]] && grep -aiE "$LOG_LEVEL"                   || cat; }
 _lgrep_live() { [[ -n "$LOG_LEVEL" ]] && grep --line-buffered -aiE "$LOG_LEVEL"   || grep --line-buffered -a ''; }
+
+# Colorize log lines by level (no-op when NO_COLOR is set)
+_colorize_log() {
+    if [[ -z "$RED" ]]; then cat; return; fi
+    awk -v r="$RED" -v y="$YELLOW" -v b="$BLUE" -v d='\033[2m' -v nc="$NC" '
+    {
+        l = tolower($0)
+        if      (l ~ /error|crit|fail|emerg|alert/) { print r $0 nc }
+        else if (l ~ /warn/)                         { print y $0 nc }
+        else if (l ~ /info/)                         { print b $0 nc }
+        else if (l ~ /debug/)                        { print d $0 nc }
+        else                                         { print }
+        fflush()
+    }'
+}
 
 # sv wrapper: in user mode pass the full service path instead of just the name
 _sv() {
@@ -459,6 +488,53 @@ cmd_log_remove() {
     _warn "log data left in place — remove manually if needed"
 }
 
+cmd_once() {
+    _check_service_exists "$1"
+    _check_service_enabled "$1"
+    _sv once "$1" && _ok "running '$1' once (will not restart)" || _error "failed to signal '$1'"
+}
+
+cmd_watch() {
+    local svc="$1"
+    local interval=2
+    while true; do
+        clear
+        echo -e "${BOLD}rsv watch${NC} — every ${interval}s — $(date)"
+        echo ""
+        cmd_status "$svc"
+        sleep "$interval"
+    done
+}
+
+cmd_finish_setup() {
+    local name="$1"
+    _check_service_exists "$name"
+
+    local finish="$SVDIR/$name/finish"
+    if [[ -f "$finish" ]]; then
+        _warn "finish script already exists at $finish"
+        exit 0
+    fi
+
+    cat > "$finish" << 'FINEOF'
+#!/bin/sh
+# Called by runit when the service exits.
+# $1 = exit code, $2 = exit signal (-1 if not killed by signal)
+exitcode="$1"
+signal="$2"
+
+# Log the exit
+logger -t "${0%/finish}" "exited: code=$exitcode signal=$signal"
+
+# Return 0  → runit will restart the service normally
+# Return 125 → runit will not restart the service
+exit 0
+FINEOF
+    chmod +x "$finish"
+    _ok "created finish script at $finish"
+    _info "edit it: $EDITOR $finish"
+}
+
 cmd_logs() {
     if [[ -n "$1" ]]; then
         _check_service_exists "$1"
@@ -481,12 +557,12 @@ cmd_logs() {
         fi
 
         if [[ -n "$log" ]]; then
-            tail -f "$log" | _lgrep_live
+            tail -f "$log" | _lgrep_live | _colorize_log
         elif [[ -f "$LOG_FILE" ]]; then
             [[ ! -f "$log_run" ]] && _info "tip: run 'rsv log-setup $1' to enable per-service logging"
-            tail -n "$((LOG_LINES * 100))" "$LOG_FILE" | grep -av '\[sudo\]' | grep -ai "$1" | _lgrep | tail -"$LOG_LINES"
+            tail -n "$((LOG_LINES * 100))" "$LOG_FILE" | grep -av '\[sudo\]' | grep -ai "$1" | _lgrep | tail -"$LOG_LINES" | _colorize_log
             _info "following new entries (Ctrl-C to stop)..."
-            tail -f "$LOG_FILE" | grep --line-buffered -av '\[sudo\]' | grep --line-buffered -ai "$1" | _lgrep_live
+            tail -f "$LOG_FILE" | grep --line-buffered -av '\[sudo\]' | grep --line-buffered -ai "$1" | _lgrep_live | _colorize_log
         else
             _error "no per-service log found and no global log at $LOG_FILE"
         fi
@@ -494,7 +570,7 @@ cmd_logs() {
         if [[ ! -f "$LOG_FILE" ]]; then
             _error "no global log at $LOG_FILE"
         fi
-        tail -f "$LOG_FILE" | _lgrep_live
+        tail -f "$LOG_FILE" | _lgrep_live | _colorize_log
     fi
 }
 
@@ -512,7 +588,7 @@ cmd_status() {
         echo ""
         if [[ -f "$LOG_FILE" ]]; then
             _info "Recent log entries:"
-            grep -ai "$1" "$LOG_FILE" | grep -ai "error\|warn\|fail\|crit" | tail -10
+            grep -ai "$1" "$LOG_FILE" | grep -av '\[sudo\]' | grep -ai "error\|warn\|fail\|crit" | tail -10 | _colorize_log
             [[ $? -ne 0 ]] && echo "  no errors found in log"
         fi
     else
@@ -591,8 +667,11 @@ usage() {
     echo "  edit    <service>   open the service run script in \$EDITOR"
     echo "  new     <service>   scaffold a new service (--log to include log service)"
     echo "  doctor              check for common runit configuration problems"
+    echo "  once    <service>   run a service once without supervision"
+    echo "  watch   [service]   auto-refreshing status (Ctrl-C to stop)"
     echo "  log-setup  <service> add a svlogd log service to an existing service"
     echo "  log-remove <service> remove the svlogd log service from a service"
+    echo "  finish-setup <service> scaffold a finish script for a service"
     echo ""
     echo -e "${BOLD}system paths (root):${NC}"
     echo "  sv dir:   /etc/runit/sv"
@@ -627,7 +706,10 @@ case "$1" in
     edit)      [[ -z "$2" ]] && usage || cmd_edit "$2" ;;
     new)       [[ -z "$2" ]] && usage || cmd_new "$2" ;;
     doctor)    cmd_doctor ;;
-    log-setup)  [[ -z "$2" ]] && usage || cmd_log_setup "$2" ;;
-    log-remove) [[ -z "$2" ]] && usage || cmd_log_remove "$2" ;;
-    *)         usage ;;
+    once)         [[ -z "$2" ]] && usage || cmd_once "$2" ;;
+    watch)        cmd_watch "$2" ;;
+    log-setup)    [[ -z "$2" ]] && usage || cmd_log_setup "$2" ;;
+    log-remove)   [[ -z "$2" ]] && usage || cmd_log_remove "$2" ;;
+    finish-setup) [[ -z "$2" ]] && usage || cmd_finish_setup "$2" ;;
+    *)            usage ;;
 esac

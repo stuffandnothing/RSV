@@ -5,7 +5,7 @@ _rsv() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="start stop restart reload enable disable status list logs edit new init doctor log-setup log-remove"
+    local commands="start stop restart reload enable disable status list logs edit new init once watch doctor log-setup log-remove finish-setup"
 
     local user_mode=0
     for word in "${words[@]}"; do
@@ -79,7 +79,10 @@ _rsv() {
                 COMPREPLY=($(compgen -W "$(_rsv_enabled)" -- "$cur"))
             fi
             ;;
-        edit|log-setup|log-remove)
+        once|watch)
+            COMPREPLY=($(compgen -W "$(_rsv_enabled)" -- "$cur"))
+            ;;
+        edit|log-setup|log-remove|finish-setup)
             COMPREPLY=($(compgen -W "$(_rsv_all)" -- "$cur"))
             ;;
         new)
