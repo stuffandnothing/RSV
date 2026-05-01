@@ -17,9 +17,12 @@ _rsv() {
         'status:show service status'
         'list:list all services'
         'logs:tail service logs'
+        'edit:open run script in $EDITOR'
+        'new:scaffold a new service'
         'init:start user runsvdir (user mode only)'
         'doctor:check for common runit problems'
         'log-setup:add a log service to an existing service'
+        'log-remove:remove the log service from a service'
     )
 
     local user_mode=0
@@ -53,6 +56,7 @@ _rsv() {
 
     _arguments -C \
         '--user[operate on user services]' \
+        '--as-user[manage another users services]:user:_users' \
         '1: :->cmd' \
         '*: :->args'
 
@@ -67,15 +71,27 @@ _rsv() {
                         '--now[also start the service immediately]' \
                         '*: :(($(_rsv_disabled)))'
                     ;;
-                start|stop|restart|reload|disable|status|logs)
+                start|stop|restart|reload|disable|status)
                     local -a svcs
                     svcs=($(_rsv_enabled))
                     _values 'service' $svcs
                     ;;
-                log-setup)
+                logs)
+                    _arguments \
+                        '--errors[show only error/warn/crit/fail lines]' \
+                        '--level[filter by log level]:levels:(error warn info crit fail)' \
+                        '--lines[number of lines to show]:N:' \
+                        '*: :(($(_rsv_enabled)))'
+                    ;;
+                edit|log-setup|log-remove)
                     local -a svcs
                     svcs=($(_rsv_all))
                     _values 'service' $svcs
+                    ;;
+                new)
+                    _arguments \
+                        '--log[also scaffold a log service]' \
+                        '*: :'
                     ;;
             esac
             ;;

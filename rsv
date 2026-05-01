@@ -128,7 +128,7 @@ fi
 
 # --- Helpers ------------------------------------------------------------------
 
-_NEEDS_ROOT=(start stop restart enable disable reload edit new log-setup)
+_NEEDS_ROOT=(start stop restart enable disable reload edit new log-setup log-remove)
 
 _check_root() {
     if [[ $EUID -ne 0 ]]; then
@@ -386,12 +386,6 @@ cmd_log_setup() {
     local name="$1"
     _check_service_exists "$name"
 
-    local logdir="$SVDIR/$name/log"
-    if [[ -f "$logdir/run" ]]; then
-        _warn "log service already exists at $logdir/run"
-        exit 0
-    fi
-
     local logdest
     if [[ $USER_MODE -eq 1 ]]; then
         logdest="$HOME/.runit/log/$name"
@@ -399,31 +393,102 @@ cmd_log_setup() {
         logdest="/var/log/$name"
     fi
 
-    mkdir -p "$logdir" "$logdest"
-    cat > "$logdir/run" << LOGEOF
+    local logdir="$SVDIR/$name/log"
+    if [[ -f "$logdir/run" ]]; then
+        if [[ -f "$logdest/current" ]]; then
+            _warn "log service already active at $logdest/current"
+            exit 0
+        fi
+        _warn "log service exists but is not active — restarting supervision"
+    else
+        mkdir -p "$logdir" "$logdest"
+        cat > "$logdir/run" << LOGEOF
 #!/bin/sh
 exec svlogd -tt $logdest
 LOGEOF
-    chmod +x "$logdir/run"
-    _ok "created log service for '$name'"
-    _ok "logs will go to: $logdest"
-    _info "restart the service to activate logging: rsv restart $name"
+        chmod +x "$logdir/run"
+        _ok "created log service for '$name'"
+        _ok "logs will go to: $logdest"
+    fi
+
+    # Restart runsv so it picks up log/run (restart alone is not enough)
+    if [[ -L "$RUNSVDIR/$name" ]]; then
+        _info "restarting supervision to activate log service..."
+        rm "$RUNSVDIR/$name"
+        # Wait for runsv to exit (supervise/ok becomes inaccessible)
+        local waited=0
+        while sv status "$SVDIR/$name" 2>&1 | grep -qv "unable to open supervise"; do
+            sleep 0.3
+            (( waited++ ))
+            [[ $waited -gt 20 ]] && break
+        done
+        ln -s "$SVDIR/$name" "$RUNSVDIR/$name"
+        _ok "log service activated"
+    else
+        _info "service is not enabled — enable it with: rsv enable --now $name"
+    fi
+}
+
+cmd_log_remove() {
+    local name="$1"
+    _check_service_exists "$name"
+
+    local logdir="$SVDIR/$name/log"
+    if [[ ! -f "$logdir/run" ]]; then
+        _warn "no log service configured for '$name'"
+        exit 0
+    fi
+
+    rm "$logdir/run"
+    [[ -f "$logdir/finish" ]] && rm "$logdir/finish"
+    _ok "removed log service for '$name'"
+
+    if [[ -L "$RUNSVDIR/$name" ]]; then
+        _info "restarting supervision to deactivate log service..."
+        rm "$RUNSVDIR/$name"
+        local waited=0
+        while sv status "$SVDIR/$name" 2>&1 | grep -qv "unable to open supervise"; do
+            sleep 0.3
+            (( waited++ ))
+            [[ $waited -gt 20 ]] && break
+        done
+        ln -s "$SVDIR/$name" "$RUNSVDIR/$name"
+        _ok "log service deactivated"
+    fi
+
+    _warn "log data left in place — remove manually if needed"
 }
 
 cmd_logs() {
     if [[ -n "$1" ]]; then
         _check_service_exists "$1"
-        local log="$SVDIR/$1/log/current"
-        if [[ -f "$log" ]]; then
+        local log_run="$SVDIR/$1/log/run"
+        local log=""
+
+        if [[ -f "$log_run" ]]; then
+            local logdest
+            logdest=$(awk '/svlogd/{print $NF}' "$log_run" | tr -d "'\"")
+            [[ -n "$logdest" && -f "$logdest/current" ]] && log="$logdest/current"
+            if [[ -z "$log" ]]; then
+                _warn "log service exists but $logdest/current not found"
+                _hint "runsv needs to restart to pick it up: rsv disable $1 && rsv enable --now $1"
+            fi
+        fi
+
+        if [[ -n "$log" && ! -s "$log" ]]; then
+            _warn "per-service log is empty — '$1' likely logs via syslog, falling back to global log"
+            log=""
+        fi
+
+        if [[ -n "$log" ]]; then
             tail -f "$log" | _lgrep_live
         elif [[ -f "$LOG_FILE" ]]; then
-            _warn "no per-service log at $log — falling back to global log (filtered)"
-            _info "tip: add a log/run script to your service to enable per-service logging"
+            [[ ! -f "$log_run" ]] && _info "tip: run 'rsv log-setup $1' to enable per-service logging"
             tail -n "$((LOG_LINES * 100))" "$LOG_FILE" | grep -av '\[sudo\]' | grep -ai "$1" | _lgrep | tail -"$LOG_LINES"
             _info "following new entries (Ctrl-C to stop)..."
             tail -f "$LOG_FILE" | grep --line-buffered -av '\[sudo\]' | grep --line-buffered -ai "$1" | _lgrep_live
         else
-            _error "no per-service log at $log and no global log at $LOG_FILE"
+            _error "no per-service log found and no global log at $LOG_FILE"
         fi
     else
         if [[ ! -f "$LOG_FILE" ]]; then
@@ -526,7 +591,8 @@ usage() {
     echo "  edit    <service>   open the service run script in \$EDITOR"
     echo "  new     <service>   scaffold a new service (--log to include log service)"
     echo "  doctor              check for common runit configuration problems"
-    echo "  log-setup <service> add a svlogd log service to an existing service"
+    echo "  log-setup  <service> add a svlogd log service to an existing service"
+    echo "  log-remove <service> remove the svlogd log service from a service"
     echo ""
     echo -e "${BOLD}system paths (root):${NC}"
     echo "  sv dir:   /etc/runit/sv"
@@ -561,6 +627,7 @@ case "$1" in
     edit)      [[ -z "$2" ]] && usage || cmd_edit "$2" ;;
     new)       [[ -z "$2" ]] && usage || cmd_new "$2" ;;
     doctor)    cmd_doctor ;;
-    log-setup) [[ -z "$2" ]] && usage || cmd_log_setup "$2" ;;
+    log-setup)  [[ -z "$2" ]] && usage || cmd_log_setup "$2" ;;
+    log-remove) [[ -z "$2" ]] && usage || cmd_log_remove "$2" ;;
     *)         usage ;;
 esac

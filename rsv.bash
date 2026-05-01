@@ -5,11 +5,11 @@ _rsv() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="start stop restart reload enable disable status list logs init"
+    local commands="start stop restart reload enable disable status list logs edit new init doctor log-setup log-remove"
 
     local user_mode=0
     for word in "${words[@]}"; do
-        [[ "$word" == "--user" ]] && { user_mode=1; break; }
+        [[ "$word" == "--user" || "$word" == "--as-user" ]] && { user_mode=1; break; }
     done
 
     local svdir runsvdir
@@ -37,6 +37,18 @@ _rsv() {
         done
     }
 
+    # Complete --as-user argument with usernames
+    if [[ "$prev" == "--as-user" ]]; then
+        COMPREPLY=($(compgen -u -- "$cur"))
+        return
+    fi
+
+    # Complete --level argument
+    if [[ "$prev" == "--level" ]]; then
+        COMPREPLY=($(compgen -W "error warn info crit fail" -- "$cur"))
+        return
+    fi
+
     local cmd=""
     for word in "${words[@]:1}"; do
         [[ "$word" == --* ]] && continue
@@ -48,7 +60,7 @@ _rsv() {
 
     case "$cmd" in
         "")
-            COMPREPLY=($(compgen -W "$commands --user" -- "$cur"))
+            COMPREPLY=($(compgen -W "$commands --user --as-user" -- "$cur"))
             ;;
         enable)
             if [[ "$cur" == --* ]]; then
@@ -57,8 +69,23 @@ _rsv() {
                 COMPREPLY=($(compgen -W "$(_rsv_disabled)" -- "$cur"))
             fi
             ;;
-        start|stop|restart|reload|disable|status|logs)
+        start|stop|restart|reload|disable|status)
             COMPREPLY=($(compgen -W "$(_rsv_enabled)" -- "$cur"))
+            ;;
+        logs)
+            if [[ "$cur" == --* ]]; then
+                COMPREPLY=($(compgen -W "--errors --level --lines" -- "$cur"))
+            else
+                COMPREPLY=($(compgen -W "$(_rsv_enabled)" -- "$cur"))
+            fi
+            ;;
+        edit|log-setup|log-remove)
+            COMPREPLY=($(compgen -W "$(_rsv_all)" -- "$cur"))
+            ;;
+        new)
+            if [[ "$cur" == --* ]]; then
+                COMPREPLY=($(compgen -W "--log" -- "$cur"))
+            fi
             ;;
     esac
 }
