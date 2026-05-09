@@ -7,10 +7,14 @@ _rsv() {
 
     local commands="start stop restart reload enable disable status list logs edit new init once watch doctor log-setup log-remove finish-setup"
 
-    local user_mode=0
+    local user_mode=1  # non-root defaults to user mode
+    local has_sudo=0
     for word in "${words[@]}"; do
+        [[ "$word" == "sudo" || "$word" == "doas" ]] && has_sudo=1
         [[ "$word" == "--user" || "$word" == "--as-user" ]] && { user_mode=1; break; }
     done
+    [[ $has_sudo -eq 1 ]] && user_mode=0
+    [[ $EUID -eq 0 ]] && user_mode=0
 
     local svdir runsvdir
     if [[ $user_mode -eq 1 ]]; then

@@ -304,7 +304,15 @@ cmd_enable() {
     mkdir -p "$RUNSVDIR"
     ln -s "$SVDIR/$1" "$RUNSVDIR/$1"
     _ok "enabled '$1'"
-    [[ $NOW -eq 1 ]] && { _sv start "$1" && _ok "started '$1'" || _error "failed to start '$1'"; }
+    if [[ $NOW -eq 1 ]]; then
+        local waited=0
+        while sv status "$SVDIR/$1" 2>&1 | grep -q "unable to open supervise"; do
+            sleep 0.2
+            (( waited++ ))
+            [[ $waited -gt 25 ]] && break
+        done
+        _sv start "$1" && _ok "started '$1'" || _error "failed to start '$1'"
+    fi
 }
 
 cmd_disable() {

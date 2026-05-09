@@ -28,7 +28,9 @@ _rsv() {
         'finish-setup:scaffold a finish script for a service'
     )
 
-    local user_mode=0
+    local user_mode=1  # non-root defaults to user mode
+    [[ $EUID -eq 0 ]] && user_mode=0
+    [[ "${words[(r)sudo]}" == "sudo" || "${words[(r)doas]}" == "doas" ]] && user_mode=0
     [[ "${words[(r)--user]}" == "--user" ]] && user_mode=1
 
     local svdir runsvdir

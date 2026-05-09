@@ -2,7 +2,13 @@
 
 # Helper: is --user flag present in the current commandline?
 function __rsv_user_mode
-    contains -- --user (commandline -opc)
+    # Explicit --user flag
+    contains -- --user (commandline -opc) && return 0
+    # sudo/doas means system mode
+    contains -- sudo (commandline -opc) && return 1
+    contains -- doas (commandline -opc) && return 1
+    # Non-root defaults to user mode
+    test (id -u) -ne 0
 end
 
 # Helper: effective sv dir based on mode
