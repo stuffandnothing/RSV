@@ -1,0 +1,8 @@
+# docker-compose.yml
+services:
+  rsv:
+    build: .
+    volumes:
+      - .:/rsv
+    stdin_open: true
+    tty: true

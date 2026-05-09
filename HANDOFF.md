@@ -73,28 +73,13 @@ When a service name isn't found, tries single-char deletion matches and
 shared-prefix heuristic to suggest the correct name (catches typos like
 `bluethoothd` → `bluetoothd`).
 
-## Open todos (from Todo.md)
-
-- [ ] `finish-setup` completion should only suggest services without existing finish scripts
-- [ ] `log-setup` completion should only suggest services without existing log/run
-- [ ] `rsv logs` historical scan overlaps with tail -f — some lines print twice
-- [ ] `rsv watch` interval hardcoded to 2s — add `--interval N`
-- [ ] `doctor` doesn't check if log supervisor is down for a service that has log/run
-- [ ] `rsv disable` doesn't wait for service to fully stop before removing symlink
-- [ ] `rsv new` doesn't validate service name (spaces, slashes, etc.)
-- [ ] NO_COLOR /proc detection may not work in containers
-
-## Docker test environment (runit on systemd host)
+## Docker test environment (runit on other inits)
 
 ```sh
-docker run -it --rm --name rsv-test \
-    -v $(pwd):/rsv \
-    voidlinux/voidlinux bash
+#Dockerfile and compose
+docker compose build
+docker compose run rsv
 
-# inside container:
-xbps-install -Sy runit sv
-cd /rsv
-bash rsv list
 ```
 
 For a more realistic test with actual supervision:
