@@ -170,6 +170,12 @@ _check_service_exists() {
                     "did you mean: rsv --user $CMD $1"
             fi
         fi
+        local _suggestion
+        _suggestion=$(_suggest_service "$1" "$SVDIR")
+        if [[ -n "$_suggestion" ]]; then
+            _error_hint "service '$1' not found in $SVDIR" \
+                "did you mean: $_suggestion?"
+        fi
         _error_hint "service '$1' not found in $SVDIR" \
             "run 'rsv list' to see available services"
     fi
@@ -182,6 +188,28 @@ _check_service_enabled() {
 }
 _is_internal() {
     [[ "$1" == "current" || "$1" == "supervise" || "$1" == ".supervisor" ]]
+}
+
+# Find a close service name match (single char insertion/deletion, or long shared prefix)
+_suggest_service() {
+    local input="$1" dir="$2"
+    local len=${#input}
+    [[ -d "$dir" ]] || return
+    for svc in "$dir"/*/; do
+        [[ -d "$svc" ]] || continue
+        local name
+        name=$(basename "$svc")
+        _is_internal "$name" && continue
+        for (( i=0; i<len; i++ )); do
+            [[ "${input:0:i}${input:i+1}" == "$name" ]] && { echo "$name"; return; }
+        done
+        local shared=0
+        while [[ $shared -lt ${#name} && $shared -lt $len \
+              && "${name:0:$((shared+1))}" == "${input:0:$((shared+1))}" ]]; do
+            (( shared++ ))
+        done
+        [[ $shared -ge 4 && $shared -ge $(( len / 2 )) ]] && { echo "$name"; return; }
+    done
 }
 
 # Log level filter helpers (passthrough when LOG_LEVEL is unset)
