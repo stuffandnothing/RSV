@@ -1,0 +1,8 @@
+# docker-compose.yml
+services:
+  rsv:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    volumes:
+      - ..:/rsv

@@ -233,11 +233,11 @@ _colorize_log() {
 
 # sv wrapper: in user mode pass the full service path instead of just the name
 _sv() {
+    local cmd="$1"; shift
     if [[ $USER_MODE -eq 1 ]]; then
-        local cmd="$1"; shift
         sv "$cmd" "$SVDIR/$1"
     else
-        sv "$@"
+        sv "$cmd" "$RUNSVDIR/$1"
     fi
 }
 
