@@ -1,7 +1,6 @@
 # RSV — Handoff Document
 
-This file is a briefing for continuing development in a new conversation.
-Delete it when no longer needed.
+This file is a briefing for continuing development
 
 ## What this is
 
@@ -13,12 +12,12 @@ Supports system services (root) and user services (non-root), with shell complet
 
 ```
 rsv          # main script (bash)
-rsv.fish     # fish completions (also installed to ~/.config/fish/completions/rsv.fish)
+rsv.fish     # fish completions
 rsv.bash     # bash completions
 rsv.zsh      # zsh completions
 Install.sh   # installer (handles root and user-local installs)
 README.md    # user-facing docs
-Todo.md      # open issues (see below)
+Todo.md      # open issues (see below) and features 
 HANDOFF.md   # this file
 ```
 
