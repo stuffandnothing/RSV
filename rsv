@@ -58,21 +58,25 @@ if [[ $USER_MODE -eq 0 ]]; then
     case "$_DISTRO" in
         void)
             SVDIR="/etc/sv"
+            _SVDIRS=("/etc/sv")
             RUNSVDIR="/var/service"
             LOG_FILE="/var/log/sv/everything/current"
             ;;
         devuan)
-  			  SVDIR="/etc/sv"
-   			 RUNSVDIR="/etc/runit/runsvdir/default"
-   			 LOG_FILE="/var/log/runit/everything/current"
-   			 ;;
+            SVDIR="/etc/sv"
+            _SVDIRS=("/etc/sv" "/usr/share/runit/sv.current")
+            RUNSVDIR="/etc/runit/runsvdir/default"
+            LOG_FILE="/var/log/runit/everything/current"
+            ;;
         artix)
             SVDIR="/etc/runit/sv"
+            _SVDIRS=("/etc/runit/sv")
             RUNSVDIR="/etc/runit/runsvdir/default"
             LOG_FILE="/var/log/everything/current"
             ;;
         *)
             SVDIR="/etc/sv"
+            _SVDIRS=("/etc/sv")
             RUNSVDIR="/var/service"
             LOG_FILE="/var/log/everything/current"
             ;;
@@ -132,6 +136,7 @@ if [[ -n "$AS_USER" ]]; then
 
     USER_MODE=1
     SVDIR="${_as_home}/.runit/sv"
+    _SVDIRS=("${_as_home}/.runit/sv")
     RUNSVDIR="${_as_home}/.runit/runsvdir"
     LOG_FILE="${_as_home}/.runit/log/everything/current"
 
@@ -170,31 +175,34 @@ _needs_root() {
 }
 
 _check_service_exists() {
-    if [[ ! -d "$SVDIR/$1" ]]; then
-        if [[ $USER_MODE -eq 1 ]]; then
-            local sys_svdir="/etc/runit/sv"
-            if [[ -d "$sys_svdir/$1" ]]; then
-                _error_hint "service '$1' not found in $SVDIR" \
-                    "did you mean: sudo rsv $CMD $1"
-            fi
-        else
-            local _uhome
-            _uhome=$(getent passwd "${SUDO_USER:-$USER}" 2>/dev/null | cut -d: -f6)
-            local user_svdir="${RUNIT_SVDIR:-${_uhome:-$HOME}/.runit/sv}"
-            if [[ -d "$user_svdir/$1" ]]; then
-                _error_hint "service '$1' not found in $SVDIR" \
-                    "did you mean: rsv --user $CMD $1"
-            fi
-        fi
-        local _suggestion
-        _suggestion=$(_suggest_service "$1" "$SVDIR")
-        if [[ -n "$_suggestion" ]]; then
+    local _dirs=("${_SVDIRS[@]:-$SVDIR}")
+    local _dir
+    for _dir in "${_dirs[@]}"; do
+        [[ -d "$_dir/$1" ]] && return 0
+    done
+    if [[ $USER_MODE -eq 1 ]]; then
+        local sys_svdir="/etc/runit/sv"
+        if [[ -d "$sys_svdir/$1" ]]; then
             _error_hint "service '$1' not found in $SVDIR" \
-                "did you mean: $_suggestion?"
+                "did you mean: sudo rsv $CMD $1"
         fi
-        _error_hint "service '$1' not found in $SVDIR" \
-            "run 'rsv list' to see available services"
+    else
+        local _uhome
+        _uhome=$(getent passwd "${SUDO_USER:-$USER}" 2>/dev/null | cut -d: -f6)
+        local user_svdir="${RUNIT_SVDIR:-${_uhome:-$HOME}/.runit/sv}"
+        if [[ -d "$user_svdir/$1" ]]; then
+            _error_hint "service '$1' not found in $SVDIR" \
+                "did you mean: rsv --user $CMD $1"
+        fi
     fi
+    local _suggestion
+    _suggestion=$(_suggest_service "$1")
+    if [[ -n "$_suggestion" ]]; then
+        _error_hint "service '$1' not found" \
+            "did you mean: $_suggestion?"
+    fi
+    _error_hint "service '$1' not found" \
+        "run 'rsv list' to see available services"
 }
 
 _check_service_enabled() {
@@ -208,24 +216,39 @@ _is_internal() {
 
 # Find a close service name match (single char insertion/deletion, or long shared prefix)
 _suggest_service() {
-    local input="$1" dir="$2"
+    local input="$1"
     local len=${#input}
-    [[ -d "$dir" ]] || return
-    for svc in "$dir"/*/; do
-        [[ -d "$svc" ]] || continue
-        local name
-        name=$(basename "$svc")
-        _is_internal "$name" && continue
-        for (( i=0; i<len; i++ )); do
-            [[ "${input:0:i}${input:i+1}" == "$name" ]] && { echo "$name"; return; }
+    local _dirs=("${_SVDIRS[@]:-$SVDIR}")
+    local _dir
+    for _dir in "${_dirs[@]}"; do
+        [[ -d "$_dir" ]] || continue
+        for svc in "$_dir"/*/; do
+            [[ -d "$svc" ]] || continue
+            local name
+            name=$(basename "$svc")
+            _is_internal "$name" && continue
+            for (( i=0; i<len; i++ )); do
+                [[ "${input:0:i}${input:i+1}" == "$name" ]] && { echo "$name"; return; }
+            done
+            local shared=0
+            while [[ $shared -lt ${#name} && $shared -lt $len \
+                  && "${name:0:$((shared+1))}" == "${input:0:$((shared+1))}" ]]; do
+                (( shared++ ))
+            done
+            [[ $shared -ge 4 && $shared -ge $(( len / 2 )) ]] && { echo "$name"; return; }
         done
-        local shared=0
-        while [[ $shared -lt ${#name} && $shared -lt $len \
-              && "${name:0:$((shared+1))}" == "${input:0:$((shared+1))}" ]]; do
-            (( shared++ ))
-        done
-        [[ $shared -ge 4 && $shared -ge $(( len / 2 )) ]] && { echo "$name"; return; }
     done
+}
+
+# Return the sv directory containing a given service name
+_find_sv() {
+    local name="$1"
+    local _dirs=("${_SVDIRS[@]:-$SVDIR}")
+    local _dir
+    for _dir in "${_dirs[@]}"; do
+        [[ -d "$_dir/$name" ]] && { echo "$_dir"; return 0; }
+    done
+    return 1
 }
 
 # Log level filter helpers (passthrough when LOG_LEVEL is unset)
@@ -312,17 +335,19 @@ cmd_reload() {
 
 cmd_enable() {
     _check_service_exists "$1"
+    local _svdir
+    _svdir=$(_find_sv "$1")
     if [[ -L "$RUNSVDIR/$1" ]]; then
         _warn "service '$1' is already enabled"
         [[ $NOW -eq 1 ]] && { _sv start "$1" && _ok "started '$1'" || _error "failed to start '$1'"; }
         exit 0
     fi
     mkdir -p "$RUNSVDIR"
-    ln -s "$SVDIR/$1" "$RUNSVDIR/$1"
+    ln -s "$_svdir/$1" "$RUNSVDIR/$1"
     _ok "enabled '$1'"
     if [[ $NOW -eq 1 ]]; then
         local waited=0
-        while sv status "$SVDIR/$1" 2>&1 | grep -q "unable to open supervise"; do
+        while sv status "$_svdir/$1" 2>&1 | grep -q "unable to open supervise"; do
             sleep 0.2
             (( waited++ ))
             [[ $waited -gt 25 ]] && break
@@ -344,7 +369,9 @@ cmd_disable() {
 
 cmd_edit() {
     _check_service_exists "$1"
-    local script="$SVDIR/$1/run"
+    local _svdir
+    _svdir=$(_find_sv "$1")
+    local script="$_svdir/$1/run"
     [[ ! -f "$script" ]] && _error "no run script at $script"
     "$(_editor)" "$script"
 }
@@ -421,7 +448,9 @@ cmd_doctor() {
             name=$(basename "$link")
             _is_internal "$name" && continue
 
-            local run="$SVDIR/$name/run"
+            local _svdir
+            _svdir=$(_find_sv "$name")
+            local run="${_svdir:-$SVDIR}/$name/run"
             if [[ ! -f "$run" ]]; then
                 echo -e "  ${RED}[fail]${NC} $name: missing run script at $run"
                 (( issues++ ))
@@ -451,6 +480,8 @@ cmd_doctor() {
 cmd_log_setup() {
     local name="$1"
     _check_service_exists "$name"
+    local _svdir
+    _svdir=$(_find_sv "$name")
 
     local logdest
     if [[ $USER_MODE -eq 1 ]]; then
@@ -459,7 +490,7 @@ cmd_log_setup() {
         logdest="/var/log/$name"
     fi
 
-    local logdir="$SVDIR/$name/log"
+    local logdir="$_svdir/$name/log"
     if [[ -f "$logdir/run" ]]; then
         if [[ -f "$logdest/current" ]]; then
             _warn "log service already active at $logdest/current"
@@ -483,12 +514,12 @@ LOGEOF
         rm "$RUNSVDIR/$name"
         # Wait for runsv to exit (supervise/ok becomes inaccessible)
         local waited=0
-        while sv status "$SVDIR/$name" 2>&1 | grep -qv "unable to open supervise"; do
+        while sv status "$_svdir/$name" 2>&1 | grep -qv "unable to open supervise"; do
             sleep 0.3
             (( waited++ ))
             [[ $waited -gt 20 ]] && break
         done
-        ln -s "$SVDIR/$name" "$RUNSVDIR/$name"
+        ln -s "$_svdir/$name" "$RUNSVDIR/$name"
         _ok "log service activated"
     else
         _info "service is not enabled — enable it with: rsv enable --now $name"
@@ -498,8 +529,10 @@ LOGEOF
 cmd_log_remove() {
     local name="$1"
     _check_service_exists "$name"
+    local _svdir
+    _svdir=$(_find_sv "$name")
 
-    local logdir="$SVDIR/$name/log"
+    local logdir="$_svdir/$name/log"
     if [[ ! -f "$logdir/run" ]]; then
         _warn "no log service configured for '$name'"
         exit 0
@@ -513,12 +546,12 @@ cmd_log_remove() {
         _info "restarting supervision to deactivate log service..."
         rm "$RUNSVDIR/$name"
         local waited=0
-        while sv status "$SVDIR/$name" 2>&1 | grep -qv "unable to open supervise"; do
+        while sv status "$_svdir/$name" 2>&1 | grep -qv "unable to open supervise"; do
             sleep 0.3
             (( waited++ ))
             [[ $waited -gt 20 ]] && break
         done
-        ln -s "$SVDIR/$name" "$RUNSVDIR/$name"
+        ln -s "$_svdir/$name" "$RUNSVDIR/$name"
         _ok "log service deactivated"
     fi
 
@@ -546,8 +579,10 @@ cmd_watch() {
 cmd_finish_setup() {
     local name="$1"
     _check_service_exists "$name"
+    local _svdir
+    _svdir=$(_find_sv "$name")
 
-    local finish="$SVDIR/$name/finish"
+    local finish="$_svdir/$name/finish"
     if [[ -f "$finish" ]]; then
         _warn "finish script already exists at $finish"
         exit 0
@@ -575,7 +610,9 @@ FINEOF
 cmd_logs() {
     if [[ -n "$1" ]]; then
         _check_service_exists "$1"
-        local log_run="$SVDIR/$1/log/run"
+        local _svdir
+        _svdir=$(_find_sv "$1")
+        local log_run="$_svdir/$1/log/run"
         local log=""
 
         if [[ -f "$log_run" ]]; then
@@ -654,23 +691,33 @@ cmd_list() {
     else
         _info "Available services:"
     fi
-    [[ -d "$SVDIR" ]] || { _warn "service directory $SVDIR does not exist"; exit 0; }
-    for svc in "$SVDIR"/*/; do
-        [[ -d "$svc" ]] || continue
-        svc=$(basename "$svc")
-        _is_internal "$svc" && continue
-        if [[ -L "$RUNSVDIR/$svc" ]]; then
-            local out
-            out=$(_sv status "$svc" 2>/dev/null)
-            if echo "$out" | grep -q "run:"; then
-                echo -e "  ${GREEN}[enabled/up]  ${NC} $svc"
+    local _dirs=("${_SVDIRS[@]:-$SVDIR}")
+    local -A _seen=()
+    local _any_dir=0
+    local _dir
+    for _dir in "${_dirs[@]}"; do
+        [[ -d "$_dir" ]] || continue
+        _any_dir=1
+        for svc in "$_dir"/*/; do
+            [[ -d "$svc" ]] || continue
+            svc=$(basename "$svc")
+            _is_internal "$svc" && continue
+            [[ -v _seen["$svc"] ]] && continue
+            _seen["$svc"]=1
+            if [[ -L "$RUNSVDIR/$svc" ]]; then
+                local out
+                out=$(_sv status "$svc" 2>/dev/null)
+                if echo "$out" | grep -q "run:"; then
+                    echo -e "  ${GREEN}[enabled/up]  ${NC} $svc"
+                else
+                    echo -e "  ${YELLOW}[enabled/down]${NC} $svc"
+                fi
             else
-                echo -e "  ${YELLOW}[enabled/down]${NC} $svc"
+                echo -e "  ${RED}[disabled]    ${NC} $svc"
             fi
-        else
-            echo -e "  ${RED}[disabled]    ${NC} $svc"
-        fi
+        done
     done
+    [[ $_any_dir -eq 0 ]] && { _warn "service directory $SVDIR does not exist"; exit 0; }
 }
 
 # --- Usage --------------------------------------------------------------------
