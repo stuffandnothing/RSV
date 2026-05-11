@@ -62,10 +62,10 @@ if [[ $USER_MODE -eq 0 ]]; then
             LOG_FILE="/var/log/sv/everything/current"
             ;;
         devuan)
-            SVDIR="/etc/sv"
-            RUNSVDIR="/etc/runit/runsvdir"
-            LOG_FILE="/var/log/runit/everything/current"
-            ;;
+  			  SVDIR="/etc/sv"
+   			 RUNSVDIR="/etc/runit/runsvdir/default"
+   			 LOG_FILE="/var/log/runit/everything/current"
+   			 ;;
         artix)
             SVDIR="/etc/runit/sv"
             RUNSVDIR="/etc/runit/runsvdir/default"
