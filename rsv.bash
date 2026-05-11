@@ -17,17 +17,27 @@ _rsv() {
     [[ $EUID -eq 0 ]] && user_mode=0
 
     local svdir runsvdir
+    local -a svdirs
     if [[ $user_mode -eq 1 ]]; then
         svdir="${RUNIT_SVDIR:-$HOME/.runit/sv}"
+        svdirs=("$svdir")
         runsvdir="${RUNIT_RUNSVDIR:-$HOME/.runit/runsvdir}"
     else
-        svdir="/etc/runit/sv"
-        runsvdir="/etc/runit/runsvdir/default"
+        local _distro
+        _distro=$(grep '^ID=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"')
+        case "$_distro" in
+            void)   svdir="/etc/sv";       svdirs=("/etc/sv");                               runsvdir="/var/service" ;;
+            devuan) svdir="/etc/sv";       svdirs=("/etc/sv" "/usr/share/runit/sv.current"); runsvdir="/etc/runit/runsvdir/default" ;;
+            artix)  svdir="/etc/runit/sv"; svdirs=("/etc/runit/sv");                         runsvdir="/etc/runit/runsvdir/default" ;;
+            *)      svdir="/etc/sv";       svdirs=("/etc/sv");                               runsvdir="/var/service" ;;
+        esac
     fi
 
     _rsv_all() {
-        [[ -d "$svdir" ]] && ls "$svdir" 2>/dev/null \
-            | grep -v 'current\|supervise\|\.supervisor'
+        local _d
+        for _d in "${svdirs[@]}"; do
+            [[ -d "$_d" ]] && ls "$_d" 2>/dev/null
+        done | grep -v 'current\|supervise\|\.supervisor' | sort -u
     }
     _rsv_enabled() {
         [[ -d "$runsvdir" ]] && ls "$runsvdir" 2>/dev/null \

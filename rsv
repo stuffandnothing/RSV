@@ -178,7 +178,10 @@ _check_service_exists() {
     local _dirs=("${_SVDIRS[@]:-$SVDIR}")
     local _dir
     for _dir in "${_dirs[@]}"; do
-        [[ -d "$_dir/$1" ]] && return 0
+        if [[ -d "$_dir/$1" ]]; then
+            _SV_FOUND_DIR="$_dir"
+            return 0
+        fi
     done
     if [[ $USER_MODE -eq 1 ]]; then
         local sys_svdir="/etc/runit/sv"
@@ -240,16 +243,6 @@ _suggest_service() {
     done
 }
 
-# Return the sv directory containing a given service name
-_find_sv() {
-    local name="$1"
-    local _dirs=("${_SVDIRS[@]:-$SVDIR}")
-    local _dir
-    for _dir in "${_dirs[@]}"; do
-        [[ -d "$_dir/$name" ]] && { echo "$_dir"; return 0; }
-    done
-    return 1
-}
 
 # Log level filter helpers (passthrough when LOG_LEVEL is unset)
 _lgrep()      { [[ -n "$LOG_LEVEL" ]] && grep -aiE "$LOG_LEVEL"                   || cat; }
@@ -335,8 +328,7 @@ cmd_reload() {
 
 cmd_enable() {
     _check_service_exists "$1"
-    local _svdir
-    _svdir=$(_find_sv "$1")
+    local _svdir=$_SV_FOUND_DIR
     if [[ -L "$RUNSVDIR/$1" ]]; then
         _warn "service '$1' is already enabled"
         [[ $NOW -eq 1 ]] && { _sv start "$1" && _ok "started '$1'" || _error "failed to start '$1'"; }
@@ -369,8 +361,7 @@ cmd_disable() {
 
 cmd_edit() {
     _check_service_exists "$1"
-    local _svdir
-    _svdir=$(_find_sv "$1")
+    local _svdir=$_SV_FOUND_DIR
     local script="$_svdir/$1/run"
     [[ ! -f "$script" ]] && _error "no run script at $script"
     "$(_editor)" "$script"
@@ -448,8 +439,7 @@ cmd_doctor() {
             name=$(basename "$link")
             _is_internal "$name" && continue
 
-            local _svdir
-            _svdir=$(_find_sv "$name")
+            local _svdir=$_SV_FOUND_DIR
             local run="${_svdir:-$SVDIR}/$name/run"
             if [[ ! -f "$run" ]]; then
                 echo -e "  ${RED}[fail]${NC} $name: missing run script at $run"
@@ -480,8 +470,7 @@ cmd_doctor() {
 cmd_log_setup() {
     local name="$1"
     _check_service_exists "$name"
-    local _svdir
-    _svdir=$(_find_sv "$name")
+    local _svdir=$_SV_FOUND_DIR
 
     local logdest
     if [[ $USER_MODE -eq 1 ]]; then
@@ -529,8 +518,7 @@ LOGEOF
 cmd_log_remove() {
     local name="$1"
     _check_service_exists "$name"
-    local _svdir
-    _svdir=$(_find_sv "$name")
+    local _svdir=$_SV_FOUND_DIR
 
     local logdir="$_svdir/$name/log"
     if [[ ! -f "$logdir/run" ]]; then
@@ -579,8 +567,7 @@ cmd_watch() {
 cmd_finish_setup() {
     local name="$1"
     _check_service_exists "$name"
-    local _svdir
-    _svdir=$(_find_sv "$name")
+    local _svdir=$_SV_FOUND_DIR
 
     local finish="$_svdir/$name/finish"
     if [[ -f "$finish" ]]; then
@@ -610,8 +597,7 @@ FINEOF
 cmd_logs() {
     if [[ -n "$1" ]]; then
         _check_service_exists "$1"
-        local _svdir
-        _svdir=$(_find_sv "$1")
+        local _svdir=$_SV_FOUND_DIR
         local log_run="$_svdir/$1/log/run"
         local log=""
 

@@ -11,12 +11,28 @@ function __rsv_user_mode
     test (id -u) -ne 0
 end
 
-# Helper: effective sv dir based on mode
-function __rsv_svdir
+# Helper: detect distro ID from /etc/os-release
+function __rsv_distro
+    grep '^ID=' /etc/os-release 2>/dev/null | string replace 'ID=' '' | string trim -c '"'
+end
+
+# Helper: print all applicable sv dirs (one per line)
+function __rsv_svdirs
     if __rsv_user_mode
-        echo (test -n "$RUNIT_SVDIR"; and echo "$RUNIT_SVDIR"; or echo "$HOME/.runit/sv")
+        test -n "$RUNIT_SVDIR"; and echo "$RUNIT_SVDIR"; or echo "$HOME/.runit/sv"
     else
-        echo /etc/runit/sv
+        set -l distro (__rsv_distro)
+        switch $distro
+            case void
+                echo /etc/sv
+            case devuan
+                echo /etc/sv
+                echo /usr/share/runit/sv.current
+            case artix
+                echo /etc/runit/sv
+            case '*'
+                echo /etc/sv
+        end
     end
 end
 
@@ -38,10 +54,9 @@ end
 
 # Helper: list all services (excluding internals)
 function __rsv_all_services
-    set -l dir (__rsv_svdir)
-    if test -d $dir
-        ls $dir | grep -v 'current\|supervise\|\.supervisor'
-    end
+    for dir in (__rsv_svdirs)
+        test -d $dir; and ls $dir 2>/dev/null
+    end | grep -v 'current\|supervise\|\.supervisor' | sort -u
 end
 
 # Helper: list only enabled services (have a symlink in runsvdir)
@@ -52,7 +67,15 @@ function __rsv_enabled_services
             ls $rundir | grep -v 'current\|supervise\|\.supervisor'
         end
     else
-        ls /etc/runit/runsvdir/default 2>/dev/null | grep -v 'current\|supervise'
+        set -l distro (__rsv_distro)
+        set -l runsvdir
+        switch $distro
+            case void '*'
+                set runsvdir /var/service
+            case devuan artix
+                set runsvdir /etc/runit/runsvdir/default
+        end
+        test -d $runsvdir; and ls $runsvdir 2>/dev/null | grep -v 'current\|supervise\|\.supervisor'
     end
 end
 
