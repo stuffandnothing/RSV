@@ -45,22 +45,38 @@ _error_hint() {
 }
 # --- Mode selection -----------------------------------------------------------
 
-USER_MODE=0
-if [[ "$1" == "--user" ]]; then
-    USER_MODE=1
-    shift
-elif [[ $EUID -ne 0 ]]; then
-    USER_MODE=1
-fi
+_detect_distro() {
+    if [[ -f /etc/os-release ]]; then
+        source /etc/os-release
+        echo "${ID,,}"
+    fi
+}
 
-if [[ $USER_MODE -eq 1 ]]; then
-    SVDIR="${RUNIT_SVDIR:-$HOME/.runit/sv}"
-    RUNSVDIR="${RUNIT_RUNSVDIR:-$HOME/.runit/runsvdir}"
-    LOG_FILE="${RUNIT_LOG:-$HOME/.runit/log/everything/current}"
-else
-    SVDIR="/etc/runit/sv"
-    RUNSVDIR="/etc/runit/runsvdir/default"
-    LOG_FILE="/var/log/everything/current"
+_DISTRO=$(_detect_distro)
+
+if [[ $USER_MODE -eq 0 ]]; then
+    case "$_DISTRO" in
+        void)
+            SVDIR="/etc/sv"
+            RUNSVDIR="/var/service"
+            LOG_FILE="/var/log/sv/everything/current"
+            ;;
+        devuan)
+            SVDIR="/etc/sv"
+            RUNSVDIR="/etc/runit/runsvdir"
+            LOG_FILE="/var/log/runit/everything/current"
+            ;;
+        artix)
+            SVDIR="/etc/runit/sv"
+            RUNSVDIR="/etc/runit/runsvdir/default"
+            LOG_FILE="/var/log/everything/current"
+            ;;
+        *)
+            SVDIR="/etc/sv"
+            RUNSVDIR="/var/service"
+            LOG_FILE="/var/log/everything/current"
+            ;;
+    esac
 fi
 
 # Strip flag args and set variables
