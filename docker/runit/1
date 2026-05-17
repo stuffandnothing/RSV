@@ -1,7 +1,0 @@
-#!/bin/sh
-mkdir -p /etc/runit/sv /etc/runit/runsvdir/default
-cp -r /rsv/docker/sv/* /etc/runit/sv/
-ln -s /etc/runit/sv/dummy-one /etc/runit/runsvdir/default/
-ln -s /etc/runit/sv/dummy-two /etc/runit/runsvdir/default/
-ln -s /etc/runit/sv/dummy-crash /etc/runit/runsvdir/default/
-sh /rsv/Install.sh --no-confirm

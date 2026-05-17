@@ -1,5 +1,0 @@
-#!/bin/sh
-while true; do
-  echo "dummy-two: $(date)"
-  sleep 5
-done

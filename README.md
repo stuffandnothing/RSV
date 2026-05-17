@@ -137,7 +137,7 @@ Paths can be overridden with environment variables:
 | `RUNIT_LOG` | `~/.runit/log/everything/current` |
 
 ## Paths
-
+On artix
 | | System | User |
 |---|---|---|
 | service definitions | `/etc/runit/sv` | `~/.runit/sv` |
