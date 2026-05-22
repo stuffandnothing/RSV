@@ -51,8 +51,18 @@ _detect_distro() {
         echo "${ID,,}"
     fi
 }
+USER_MODE=0
+for _a in "$@"; do [[ "$_a" == "--user" ]] && USER_MODE=1 && break; done
+[[ $EUID -ne 0 ]] && USER_MODE=1
 
 _DISTRO=$(_detect_distro)
+
+case "$_DISTRO" in
+    void)    _SYS_SVDIRS=("/etc/sv") ;;
+    devuan)  _SYS_SVDIRS=("/etc/sv" "/usr/share/runit/sv.current") ;;
+    artix)   _SYS_SVDIRS=("/etc/runit/sv") ;;
+    *)       _SYS_SVDIRS=("/etc/sv") ;;
+esac
 
 if [[ $USER_MODE -eq 0 ]]; then
     case "$_DISTRO" in
@@ -81,7 +91,16 @@ if [[ $USER_MODE -eq 0 ]]; then
             LOG_FILE="/var/log/everything/current"
             ;;
     esac
+
+else
+    SVDIR="${RUNIT_SVDIR:-$HOME/.runit/sv}"
+    RUNSVDIR="${RUNIT_RUNSVDIR:-$HOME/.runit/runsvdir}"
+    LOG_FILE="${RUNIT_LOG:-$HOME/.runit/log/everything/current}"
 fi
+
+
+
+_ORIG_ARGS=("$@")
 
 # Strip flag args and set variables
 NOW=0
@@ -103,6 +122,8 @@ for _a in "$@"; do
     elif [[ $_next_lines -eq 1 ]]; then
         LOG_LINES="$_a"
         _next_lines=0
+    elif [[ "$_a" == "--user" ]]; then
+        : # already handled above
     elif [[ "$_a" == "--now" ]]; then
         NOW=1
     elif [[ "$_a" == "--errors" ]]; then
@@ -157,6 +178,25 @@ fi
 
 # --- Helpers ------------------------------------------------------------------
 
+_reexec_as_root() {
+    local escalator
+    if command -v sudo >/dev/null 2>&1; then
+    echo reruning as root
+        escalator="sudo"
+    elif command -v doas >/dev/null 2>&1; then
+    echo trying  as root
+        escalator="doas"
+    else
+        return 1
+    fi
+    local new_args=()
+    for _a in "${_ORIG_ARGS[@]}"; do
+        [[ "$_a" == "--user" ]] && continue
+        new_args+=("$_a")
+    done
+    exec "$escalator" "$0" "${new_args[@]}"
+}
+
 _NEEDS_ROOT=(start stop restart enable disable reload edit new once log-setup log-remove finish-setup)
 
 _check_root() {
@@ -184,11 +224,14 @@ _check_service_exists() {
         fi
     done
     if [[ $USER_MODE -eq 1 ]]; then
-        local sys_svdir="/etc/runit/sv"
-        if [[ -d "$sys_svdir/$1" ]]; then
-            _error_hint "service '$1' not found in $SVDIR" \
-                "did you mean: sudo rsv $CMD $1"
-        fi
+        local _sdir
+        for _sdir in "${_SYS_SVDIRS[@]}"; do
+            if [[ -d "$_sdir/$1" ]]; then
+                _reexec_as_root && return
+                _error_hint "service '$1' not found in $SVDIR" \
+                    "did you mean: sudo rsv $CMD $1"
+            fi
+        done
     else
         local _uhome
         _uhome=$(getent passwd "${SUDO_USER:-$USER}" 2>/dev/null | cut -d: -f6)

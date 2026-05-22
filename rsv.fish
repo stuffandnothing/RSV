@@ -19,20 +19,25 @@ end
 # Helper: print all applicable sv dirs (one per line)
 function __rsv_svdirs
     if __rsv_user_mode
-        test -n "$RUNIT_SVDIR"; and echo "$RUNIT_SVDIR"; or echo "$HOME/.runit/sv"
-    else
-        set -l distro (__rsv_distro)
-        switch $distro
-            case void
-                echo /etc/sv
-            case devuan
-                echo /etc/sv
-                echo /usr/share/runit/sv.current
-            case artix
-                echo /etc/runit/sv
-            case '*'
-                echo /etc/sv
+        set -l udir (test -n "$RUNIT_SVDIR"; and echo "$RUNIT_SVDIR"; or echo "$HOME/.runit/sv")
+        # If user sv dir has services, use it; otherwise fall back to system paths
+        # (rsv will auto-escalate for system services)
+        if test -d $udir; and count (ls $udir 2>/dev/null) > /dev/null
+            echo $udir
+            return
         end
+    end
+    set -l distro (__rsv_distro)
+    switch $distro
+        case void
+            echo /etc/sv
+        case devuan
+            echo /etc/sv
+            echo /usr/share/runit/sv.current
+        case artix
+            echo /etc/runit/sv
+        case '*'
+            echo /etc/sv
     end
 end
 
@@ -70,10 +75,10 @@ function __rsv_enabled_services
         set -l distro (__rsv_distro)
         set -l runsvdir
         switch $distro
-            case void '*'
-                set runsvdir /var/service
             case devuan artix
                 set runsvdir /etc/runit/runsvdir/default
+            case '*'
+                set runsvdir /var/service
         end
         test -d $runsvdir; and ls $runsvdir 2>/dev/null | grep -v 'current\|supervise\|\.supervisor'
     end

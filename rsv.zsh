@@ -29,17 +29,17 @@ _rsv() {
     )
 
     local user_mode=1  # non-root defaults to user mode
-    [[ $EUID -eq 0 ]] && user_mode=0
-    [[ "${words[(r)sudo]}" == "sudo" || "${words[(r)doas]}" == "doas" ]] && user_mode=0
-    [[ "${words[(r)--user]}" == "--user" ]] && user_mode=1
+    local has_user_flag=0
+    # $BUFFER is the raw line — reliable even when sudo strips itself from $words
+    [[ "${words[(r)--user]}" == "--user" ]] && has_user_flag=1
+    if [[ $has_user_flag -eq 0 ]]; then
+        [[ "$BUFFER" =~ '(^|[[:space:]])(sudo|doas)[[:space:]]' ]] && user_mode=0
+        [[ $EUID -eq 0 ]] && user_mode=0
+    fi
 
     local svdir runsvdir
     local -a svdirs
-    if [[ $user_mode -eq 1 ]]; then
-        svdir="${RUNIT_SVDIR:-$HOME/.runit/sv}"
-        svdirs=("$svdir")
-        runsvdir="${RUNIT_RUNSVDIR:-$HOME/.runit/runsvdir}"
-    else
+    _rsv_system_paths() {
         local _distro
         _distro=$(grep '^ID=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"')
         case "$_distro" in
@@ -48,6 +48,17 @@ _rsv() {
             artix)  svdir="/etc/runit/sv"; svdirs=("/etc/runit/sv");                         runsvdir="/etc/runit/runsvdir/default" ;;
             *)      svdir="/etc/sv";       svdirs=("/etc/sv");                               runsvdir="/var/service" ;;
         esac
+    }
+    if [[ $user_mode -eq 1 ]]; then
+        svdir="${RUNIT_SVDIR:-$HOME/.runit/sv}"
+        svdirs=("$svdir")
+        runsvdir="${RUNIT_RUNSVDIR:-$HOME/.runit/runsvdir}"
+        # If user sv dir is absent or empty, fall back to system paths
+        if [[ ! -d "$svdir" || -z "$(ls "$svdir" 2>/dev/null)" ]]; then
+            _rsv_system_paths
+        fi
+    else
+        _rsv_system_paths
     fi
 
     _rsv_all() {
@@ -80,11 +91,19 @@ _rsv() {
             _describe 'command' commands
             ;;
         args)
-            case $words[2] in
+            # Find the actual command — words[2] may be a flag if --user etc. precede it
+            local cmd=""
+            local w
+            for w in ${words[2,-1]}; do
+                [[ "$w" == --* ]] && continue
+                cmd="$w"
+                break
+            done
+            case $cmd in
                 enable)
                     _arguments \
                         '--now[also start the service immediately]' \
-                        '*: :(($(_rsv_disabled)))'
+                        '*: :($(_rsv_disabled))'
                     ;;
                 start|stop|restart|reload|disable|status)
                     local -a svcs
@@ -96,7 +115,7 @@ _rsv() {
                         '--errors[show only error/warn/crit/fail lines]' \
                         '--level[filter by log level]:levels:(error warn info crit fail)' \
                         '--lines[number of lines to show]:N:' \
-                        '*: :(($(_rsv_enabled)))'
+                        '*: :($(_rsv_enabled))'
                     ;;
                 once|watch)
                     local -a svcs
