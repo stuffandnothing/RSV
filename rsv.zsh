@@ -28,56 +28,67 @@ _rsv() {
         'finish-setup:scaffold a finish script for a service'
     )
 
-    local user_mode=1  # non-root defaults to user mode
-    local has_user_flag=0
-    # $BUFFER is the raw line — reliable even when sudo strips itself from $words
-    [[ "${words[(r)--user]}" == "--user" ]] && has_user_flag=1
-    if [[ $has_user_flag -eq 0 ]]; then
-        [[ "$BUFFER" =~ '(^|[[:space:]])(sudo|doas)[[:space:]]' ]] && user_mode=0
-        [[ $EUID -eq 0 ]] && user_mode=0
-    fi
-
+    # Distro-aware system paths
     local svdir runsvdir
     local -a svdirs
-    _rsv_system_paths() {
-        local _distro
-        _distro=$(grep '^ID=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"')
-        case "$_distro" in
-            void)   svdir="/etc/sv";       svdirs=("/etc/sv");                               runsvdir="/var/service" ;;
-            devuan) svdir="/etc/sv";       svdirs=("/etc/sv" "/usr/share/runit/sv.current"); runsvdir="/etc/runit/runsvdir/default" ;;
-            artix)  svdir="/etc/runit/sv"; svdirs=("/etc/runit/sv");                         runsvdir="/etc/runit/runsvdir/default" ;;
-            *)      svdir="/etc/sv";       svdirs=("/etc/sv");                               runsvdir="/var/service" ;;
-        esac
-    }
-    if [[ $user_mode -eq 1 ]]; then
-        svdir="${RUNIT_SVDIR:-$HOME/.runit/sv}"
-        svdirs=("$svdir")
-        runsvdir="${RUNIT_RUNSVDIR:-$HOME/.runit/runsvdir}"
-        # If user sv dir is absent or empty, fall back to system paths
-        if [[ ! -d "$svdir" || -z "$(ls "$svdir" 2>/dev/null)" ]]; then
-            _rsv_system_paths
-        fi
-    else
-        _rsv_system_paths
-    fi
+    local _distro
+    _distro=$(grep '^ID=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"')
+    case "$_distro" in
+        void)   svdir="/etc/sv";       svdirs=("/etc/sv");                               runsvdir="/var/service" ;;
+        devuan) svdir="/etc/sv";       svdirs=("/etc/sv" "/usr/share/runit/sv.current"); runsvdir="/etc/runit/runsvdir/default" ;;
+        artix)  svdir="/etc/runit/sv"; svdirs=("/etc/runit/sv");                         runsvdir="/etc/runit/runsvdir/default" ;;
+        *)      svdir="/etc/sv";       svdirs=("/etc/sv");                               runsvdir="/var/service" ;;
+    esac
 
+    local user_svdir="${RUNIT_SVDIR:-$HOME/.runit/sv}"
+    local user_runsvdir="${RUNIT_RUNSVDIR:-$HOME/.runit/runsvdir}"
+
+    # Build parallel name/description arrays for _describe, labeled (root)/(user)
     _rsv_all() {
-        local _d
+        local -a names descs _d svc
         for _d in "${svdirs[@]}"; do
-            [[ -d "$_d" ]] && ls "$_d" 2>/dev/null
-        done | grep -v 'current\|supervise\|\.supervisor' | sort -u
+            [[ -d "$_d" ]] || continue
+            for svc in $(ls "$_d" 2>/dev/null | grep -v 'current\|supervise\|\.supervisor'); do
+                names+=("$svc"); descs+=("root")
+            done
+        done
+        if [[ -d "$user_svdir" ]]; then
+            for svc in $(ls "$user_svdir" 2>/dev/null | grep -v 'current\|supervise\|\.supervisor'); do
+                names+=("$svc"); descs+=("user")
+            done
+        fi
+        _describe 'service' names descs
     }
     _rsv_enabled() {
-        [[ -d "$runsvdir" ]] && ls "$runsvdir" 2>/dev/null \
-            | grep -v 'current\|supervise\|\.supervisor'
+        local -a names descs svc
+        if [[ -d "$runsvdir" ]]; then
+            for svc in $(ls "$runsvdir" 2>/dev/null | grep -v 'current\|supervise\|\.supervisor'); do
+                names+=("$svc"); descs+=("root")
+            done
+        fi
+        if [[ -d "$user_runsvdir" ]]; then
+            for svc in $(ls "$user_runsvdir" 2>/dev/null | grep -v 'current\|supervise\|\.supervisor'); do
+                names+=("$svc"); descs+=("user")
+            done
+        fi
+        _describe 'service' names descs
     }
     _rsv_disabled() {
-        local -a all enabled
-        all=($(_rsv_all))
-        enabled=($(_rsv_enabled))
-        for svc in $all; do
-            (( ${enabled[(I)$svc]} )) || echo "$svc"
+        local -a names descs _d svc
+        for _d in "${svdirs[@]}"; do
+            [[ -d "$_d" ]] || continue
+            for svc in $(ls "$_d" 2>/dev/null | grep -v 'current\|supervise\|\.supervisor'); do
+                [[ -L "$runsvdir/$svc" ]] && continue
+                names+=("$svc"); descs+=("root")
+            done
         done
+        if [[ -d "$user_svdir" ]]; then
+            for svc in $(ls "$user_svdir" 2>/dev/null | grep -v 'current\|supervise\|\.supervisor'); do
+                [[ -L "$user_runsvdir/$svc" ]] && continue
+                names+=("$svc"); descs+=("user")
+            done
+        fi
+        _describe 'service' names descs
     }
 
     _arguments -C \
@@ -91,7 +102,6 @@ _rsv() {
             _describe 'command' commands
             ;;
         args)
-            # Find the actual command — words[2] may be a flag if --user etc. precede it
             local cmd=""
             local w
             for w in ${words[2,-1]}; do
@@ -103,29 +113,14 @@ _rsv() {
                 enable)
                     _arguments \
                         '--now[also start the service immediately]' \
-                        '*: :($(_rsv_disabled))'
+                        '*: :->svcs'
+                    [[ $state == svcs ]] && _rsv_disabled
                     ;;
-                start|stop|restart|reload|disable|status)
-                    local -a svcs
-                    svcs=($(_rsv_enabled))
-                    _values 'service' $svcs
-                    ;;
-                logs)
-                    _arguments \
-                        '--errors[show only error/warn/crit/fail lines]' \
-                        '--level[filter by log level]:levels:(error warn info crit fail)' \
-                        '--lines[number of lines to show]:N:' \
-                        '*: :($(_rsv_enabled))'
-                    ;;
-                once|watch)
-                    local -a svcs
-                    svcs=($(_rsv_enabled))
-                    _values 'service' $svcs
+                start|stop|restart|reload|disable|status|once|watch|logs)
+                    _rsv_enabled
                     ;;
                 edit|log-setup|log-remove|finish-setup)
-                    local -a svcs
-                    svcs=($(_rsv_all))
-                    _values 'service' $svcs
+                    _rsv_all
                     ;;
                 new)
                     _arguments \
