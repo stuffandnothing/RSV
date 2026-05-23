@@ -168,6 +168,11 @@ _rsv() {
                 finish-setup)
                     _rsv_no_finish
                     ;;
+                list)
+                    _arguments \
+                        '--uptime[show uptime for running services]' \
+                        '-u[show uptime for running services]'
+                    ;;
                 new)
                     _arguments \
                         '--log[also scaffold a log service]' \

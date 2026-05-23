@@ -8,6 +8,30 @@ A friendly wrapper around runit's `sv` command, with system and user service sup
 I don't hate myself and this is a nice wrapper. \
 The inspiration was OpenRC's `rc-service` and `rc-update`.
 I hate doing `ln -s /etc/runit/sv/service_name /run/runit/service` — that gets annoying fast, and I don't have to think about it with this.
+
+
+</details>
+<details>
+<summary>Other runit service managers</summary>
+
+Before starting this project I wasn't aware of existing tools. Here's how they compare:
+
+| Tool | Language | Last Updated | Notes |
+|------|----------|-------------|-------|
+| [rsv](https://github.com/JojiiOfficial/rsv) | Rust | ~3 years ago | Abandoned |
+| [vsv](https://github.com/bahamas10/vsv) | Rust (rewrite of bash) | ~3 years ago | Void-focused, v2.0.0 never released |
+| [rsm](https://gitea.artixlinux.org/linuxer/Runit-Service-Manager) | Bash | ~5 years ago | vsv fork for Artix, shows internal runit dirs as services |
+| [roonit](https://github.com/19742bytes/roonit) | ? | ? | |
+
+### `list` benchmark (Artix, 47 services)
+
+| Tool | Time |
+|------|------|
+| `rsm` | ~168ms |
+| `rsv` | ~65ms |
+
+`rsv` is also the only one with smart tab completions, `doctor`, service scaffolding, log management, and works correctly in containers.
+
 </details>
 
 ## Installation

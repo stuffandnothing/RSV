@@ -124,6 +124,7 @@ NOW=0
 LOG_LEVEL=""
 LOG_LINES=10
 WATCH_INTERVAL=2
+LIST_UPTIME=0
 WITH_LOG=0
 AS_USER=""
 _args=()
@@ -165,6 +166,8 @@ for _a in "$@"; do
         _next_interval=1
     elif [[ "$_a" == --interval=* ]]; then
         WATCH_INTERVAL="${_a#--interval=}"
+    elif [[ "$_a" == "-u" || "$_a" == "--uptime" ]]; then
+        LIST_UPTIME=1
     elif [[ "$_a" == "--as-user" ]]; then
         _next_as_user=1
     elif [[ "$_a" == --as-user=* ]]; then
@@ -863,10 +866,14 @@ cmd_list() {
                 local out
                 out=$(_sv status "$svc" 2>/dev/null)
                 if [[ "$out" == *"run:"* ]]; then
-                    local uptime uptime_str
-                    _parse_uptime "$out" uptime
-                    _fmt_uptime "$uptime" uptime_str
-echo -e "  ${GREEN}[enabled/up]  ${NC} $svc ($uptime_str)"
+                    if [[ $LIST_UPTIME -eq 1 ]]; then
+                        local uptime uptime_str
+                        _parse_uptime "$out" uptime
+                        _fmt_uptime "$uptime" uptime_str
+                        echo -e "  ${GREEN}[enabled/up]  ${NC} $svc ($uptime_str)"
+                    else
+                        echo -e "  ${GREEN}[enabled/up]  ${NC} $svc"
+                    fi
                 else
                     echo -e "  ${YELLOW}[enabled/down]${NC} $svc"
                 fi
@@ -895,6 +902,7 @@ usage() {
     echo "  --level <levels>    with logs: filter by level e.g. --level error,warn"
     echo "  --lines <N>         with logs: show last N matching lines (default 10)"
     echo "  --log               with new: also scaffold a log service"
+    echo "  -u, --uptime        with list: show uptime for running services"
     echo "  --interval <N>      with watch: refresh every N seconds (default 2)"
     echo ""
     echo -e "${BOLD}commands:${NC}"
@@ -906,7 +914,7 @@ usage() {
     echo "  enable  <service>   enable a service"
     echo "  disable <service>   disable a service"
     echo "  status  [service]   show status of one or all enabled services"
-    echo "  list                list all available services and their state"
+    echo "  list                list all available services and their state (-u to show uptime)"
     echo "  logs    [service]   tail logs for a service (or global log)"
     echo "  edit    <service>   open the service run script in \$EDITOR"
     echo "  new     <service>   scaffold a new service (--log to include log service)"

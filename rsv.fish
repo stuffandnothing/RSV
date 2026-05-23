@@ -168,6 +168,10 @@ complete -c rsv -f -n __rsv_no_cmd -a "enable"       -d "enable a service"
 complete -c rsv -f -n __rsv_no_cmd -a "disable"      -d "disable a service"
 complete -c rsv -f -n __rsv_no_cmd -a "status"       -d "show service status"
 complete -c rsv -f -n __rsv_no_cmd -a "list"         -d "list all services"
+complete -c rsv -f -n "__rsv_cmd_is list; and not contains -- --uptime (commandline -opc); and not contains -- -u (commandline -opc)" \
+    -a "--uptime" -d "show uptime for running services"
+complete -c rsv -f -n "__rsv_cmd_is list; and not contains -- --uptime (commandline -opc); and not contains -- -u (commandline -opc)" \
+    -a "-u" -d "show uptime for running services"
 complete -c rsv -f -n __rsv_no_cmd -a "logs"         -d "tail service logs"
 complete -c rsv -f -n __rsv_no_cmd -a "edit"         -d "open run script in \$EDITOR"
 complete -c rsv -f -n __rsv_no_cmd -a "new"          -d "scaffold a new service"
