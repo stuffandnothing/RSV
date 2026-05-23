@@ -1,4 +1,4 @@
-# Rsv
+# rsv
 
 A friendly wrapper around runit's `sv` command, with system and user service support.
 
@@ -9,8 +9,8 @@ I don't hate myself and this is a nice wrapper. \
 The inspiration was OpenRC's `rc-service` and `rc-update`.
 I hate doing `ln -s /etc/runit/sv/service_name /run/runit/service` — that gets annoying fast, and I don't have to think about it with this.
 
-
 </details>
+
 <details>
 <summary>Other runit service managers</summary>
 
@@ -18,10 +18,11 @@ Before starting this project I wasn't aware of existing tools. Here's how they c
 
 | Tool | Language | Last Updated | Notes |
 |------|----------|-------------|-------|
-| [rsv](https://github.com/JojiiOfficial/rsv) | Rust | ~3 years ago | Abandoned, `list` is raw `sv status *` dump |
-| [vsv](https://github.com/bahamas10/vsv) | Rust (rewrite of bash) | ~3 years ago | Void-focused,  |
-| [rsm](https://gitea.artixlinux.org/linuxer/Runit-Service-Manager) | Bash | ~5 years ago | vsv fork for Artix, shows internal runit dirs as services |
-| [roonit](https://github.com/19742bytes/roonit) | ? | ? | |
+| [rsv](https://github.com/JojiiOfficial/rsv) | Rust | ~3 years ago | Abandoned, `list` is raw `sv status` dump |
+| [vsv](https://github.com/bahamas10/vsv) | Rust | ~3 years ago | Rewrite of bash-vsv, Void-focused, Abandoned |
+| [bash-vsv](https://github.com/bahamas10/bash-vsv) | Bash | ~3 years ago | Original vsv, Void-focused, Abandoned |
+| [rsm](https://gitea.artixlinux.org/linuxer/Runit-Service-Manager) | Bash | ~5 years ago | bash-vsv fork for Artix, shows internal runit dirs as services, Abandoned |
+| [roonit](https://github.com/19742bytes/roonit) | C | ~5 years ago | Void-focused, very basic, Abandoned |
 
 ### `list` benchmark (Artix, 47 services)
 
@@ -30,7 +31,10 @@ Before starting this project I wasn't aware of existing tools. Here's how they c
 | `rsv` (JojiiOfficial) | ~14ms | Raw unsorted `sv status` dump, no colors, includes internal dirs |
 | `rsm` | ~168ms | Formatted, but includes `current`/`supervise` as services |
 | `rsv` (this) | ~28ms | Sorted, colored, filters internals, enabled/disabled distinction |
-| `rsv` (this) `-u` | ~37ms | Same + uptime |
+| `rsv` (this) `-u` | ~37ms | Same + uptime via single batched `sv` call |
+| others | ? | Untested, don't use Void |
+
+If you use Void and want to benchmark I will add those.
 
 </details>
 
@@ -101,15 +105,17 @@ System services require root. User services are selected automatically when not 
 
 ### Flags
 
-| Flag | Description |
-|---|---|
-| `--user` | operate on user services (auto-set when not root) |
-| `--as-user <user>` | manage another user's services (requires r/w access) |
-| `--now` | with `enable`: also start the service immediately |
-| `--log` | with `new`: also scaffold a log service |
-| `--errors` | with `logs`: show only error/warn/crit/fail lines |
-| `--level <levels>` | with `logs`: filter by log level, e.g. `--level error,warn` |
-| `--lines <N>` | with `logs`: show last N matching lines (default 10) |
+| Flag | Applies to | Description |
+|---|---|---|
+| `--user` | all | operate on user services (auto-set when not root) |
+| `--as-user <user>` | all | manage another user's services (requires r/w access) |
+| `--now` | `enable` | also start the service immediately |
+| `--log` | `new` | also scaffold a log service |
+| `-u`, `--uptime` | `list` | show uptime for running services |
+| `--interval <N>` | `watch` | refresh every N seconds (default 2) |
+| `--errors` | `logs` | show only error/warn/crit/fail lines |
+| `--level <levels>` | `logs` | filter by log level, e.g. `--level error,warn` |
+| `--lines <N>` | `logs` | show last N matching lines (default 10) |
 
 ## Examples
 
@@ -118,9 +124,14 @@ System services require root. User services are selected automatically when not 
 sudo rsv status
 sudo rsv restart NetworkManager
 sudo rsv enable --now sshd
+sudo rsv list
+sudo rsv list -u
 sudo rsv logs NetworkManager
 sudo rsv logs NetworkManager --errors
 sudo rsv logs NetworkManager --level info,warn
+
+# watch services refresh every 5 seconds
+sudo rsv watch --interval 5
 
 # user services
 rsv status
@@ -161,12 +172,32 @@ Paths can be overridden with environment variables:
 | `RUNIT_LOG` | `~/.runit/log/everything/current` |
 
 ## Paths
-On artix
+
+### Artix
+
 | | System | User |
 |---|---|---|
 | service definitions | `/etc/runit/sv` | `~/.runit/sv` |
 | enabled services | `/etc/runit/runsvdir/default` | `~/.runit/runsvdir` |
 | global log | `/var/log/everything/current` | `~/.runit/log/everything/current` |
+| per-service log | `/var/log/<service>/current` | `~/.runit/log/<service>/current` |
+
+### Void
+
+| | System | User |
+|---|---|---|
+| service definitions | `/etc/sv` | `~/.runit/sv` |
+| enabled services | `/var/service` | `~/.runit/runsvdir` |
+| global log | `/var/log/sv/everything/current` | `~/.runit/log/everything/current` |
+| per-service log | `/var/log/sv/<service>/current` | `~/.runit/log/<service>/current` |
+
+### Devuan
+
+| | System | User |
+|---|---|---|
+| service definitions | `/etc/sv` | `~/.runit/sv` |
+| enabled services | `/etc/runit/runsvdir/default` | `~/.runit/runsvdir` |
+| global log | `/var/log/runit/everything/current` | `~/.runit/log/everything/current` |
 | per-service log | `/var/log/<service>/current` | `~/.runit/log/<service>/current` |
 
 ## Per-service logging
@@ -193,8 +224,8 @@ Log data is left in place — remove it manually if no longer needed.
 
 Completions for fish, bash, and zsh are included. The install script places them automatically.
 
-Commands, flags, and service names are all completed. Flags like `--now`, `--errors`, `--level`, and `--lines` only appear for the commands they apply to.
+Commands, flags, and service names are all completed. Flags only appear for the commands they apply to — `--now` for `enable`, `--log` and `--user` for `new`, `-u`/`--uptime` for `list`, `--interval` for `watch`, and `--errors`/`--level`/`--lines` for `logs`. `log-setup` and `finish-setup` only suggest services that don't already have a log service or finish script respectively.
 
 ## NO_COLOR
 
-rsv respects the [`NO_COLOR`](https://no-color.org) convention.
+rsv respects the [`NO_COLOR`](https://no-color.org) convention. When running under `sudo`, it recovers the variable from the parent shell's environment since sudo strips it. `TERM=dumb` also disables color.
