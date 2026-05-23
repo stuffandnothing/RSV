@@ -35,6 +35,30 @@ _rsv() {
           [[ -d "$user_runsvdir" ]] && ls "$user_runsvdir" 2>/dev/null
         } | grep -v 'current\|supervise\|\.supervisor' | sort -u
     }
+    _rsv_no_log() {
+        local _d svc
+        for _d in "${svdirs[@]}"; do
+            [[ -d "$_d" ]] || continue
+            for svc in $(ls "$_d" 2>/dev/null | grep -v 'current\|supervise\|\.supervisor'); do
+                [[ -f "$_d/$svc/log/run" ]] || echo "$svc"
+            done
+        done
+        [[ -d "$user_svdir" ]] && for svc in $(ls "$user_svdir" 2>/dev/null | grep -v 'current\|supervise\|\.supervisor'); do
+            [[ -f "$user_svdir/$svc/log/run" ]] || echo "$svc"
+        done
+    }
+    _rsv_no_finish() {
+        local _d svc
+        for _d in "${svdirs[@]}"; do
+            [[ -d "$_d" ]] || continue
+            for svc in $(ls "$_d" 2>/dev/null | grep -v 'current\|supervise\|\.supervisor'); do
+                [[ -f "$_d/$svc/finish" ]] || echo "$svc"
+            done
+        done
+        [[ -d "$user_svdir" ]] && for svc in $(ls "$user_svdir" 2>/dev/null | grep -v 'current\|supervise\|\.supervisor'); do
+            [[ -f "$user_svdir/$svc/finish" ]] || echo "$svc"
+        done
+    }
     _rsv_disabled() {
         local enabled
         enabled=$(_rsv_enabled)
@@ -85,15 +109,28 @@ _rsv() {
                 COMPREPLY=($(compgen -W "$(_rsv_enabled)" -- "$cur"))
             fi
             ;;
-        once|watch)
+        once)
             COMPREPLY=($(compgen -W "$(_rsv_enabled)" -- "$cur"))
             ;;
-        edit|log-setup|log-remove|finish-setup)
+        watch)
+            if [[ "$cur" == --* ]]; then
+                COMPREPLY=($(compgen -W "--interval" -- "$cur"))
+            else
+                COMPREPLY=($(compgen -W "$(_rsv_enabled)" -- "$cur"))
+            fi
+            ;;
+        edit|log-remove)
             COMPREPLY=($(compgen -W "$(_rsv_all)" -- "$cur"))
+            ;;
+        log-setup)
+            COMPREPLY=($(compgen -W "$(_rsv_no_log)" -- "$cur"))
+            ;;
+        finish-setup)
+            COMPREPLY=($(compgen -W "$(_rsv_no_finish)" -- "$cur"))
             ;;
         new)
             if [[ "$cur" == --* ]]; then
-                COMPREPLY=($(compgen -W "--log" -- "$cur"))
+                COMPREPLY=($(compgen -W "--log --user" -- "$cur"))
             fi
             ;;
     esac

@@ -112,6 +112,46 @@ function __rsv_disabled_services
     end
 end
 
+# Helper: services without an existing log/run (candidates for log-setup)
+function __rsv_no_log_services
+    for dir in (__rsv_sys_svdirs)
+        test -d $dir || continue
+        for svc in (ls $dir 2>/dev/null | grep -v 'current\|supervise\|\.supervisor')
+            if not test -f "$dir/$svc/log/run"
+                printf "%s\troot\n" $svc
+            end
+        end
+    end
+    set -l udir (__rsv_user_svdir)
+    if test -d $udir
+        for svc in (ls $udir 2>/dev/null | grep -v 'current\|supervise\|\.supervisor')
+            if not test -f "$udir/$svc/log/run"
+                printf "%s\tuser\n" $svc
+            end
+        end
+    end
+end
+
+# Helper: services without an existing finish script (candidates for finish-setup)
+function __rsv_no_finish_services
+    for dir in (__rsv_sys_svdirs)
+        test -d $dir || continue
+        for svc in (ls $dir 2>/dev/null | grep -v 'current\|supervise\|\.supervisor')
+            if not test -f "$dir/$svc/finish"
+                printf "%s\troot\n" $svc
+            end
+        end
+    end
+    set -l udir (__rsv_user_svdir)
+    if test -d $udir
+        for svc in (ls $udir 2>/dev/null | grep -v 'current\|supervise\|\.supervisor')
+            if not test -f "$udir/$svc/finish"
+                printf "%s\tuser\n" $svc
+            end
+        end
+    end
+end
+
 # --- Flags (before any subcommand) ---
 complete -c rsv -f -n __rsv_no_cmd -a "--user" -d "operate on user services"
 complete -c rsv -f -n "__rsv_no_cmd; and not contains -- --as-user (commandline -opc)" \
@@ -157,13 +197,17 @@ complete -c rsv -f -n "__rsv_cmd_is enable; and not contains -- --now (commandli
 
 complete -c rsv -f -n "__rsv_cmd_is new; and not contains -- --log (commandline -opc)" \
     -a "--log" -d "also scaffold a log service"
+complete -c rsv -f -n "__rsv_cmd_is new; and not contains -- --user (commandline -opc)" \
+    -a "--user" -d "create in user service directory"
 
 complete -c rsv -f -n "__rsv_cmd_is once"  -a "(__rsv_enabled_services)"
 complete -c rsv -f -n "__rsv_cmd_is watch" -a "(__rsv_enabled_services)"
+complete -c rsv -f -n "__rsv_cmd_is watch; and not contains -- --interval (commandline -opc)" \
+    -a "--interval" -d "refresh every N seconds (default 2)"
 
-complete -c rsv -f -n "__rsv_cmd_is log-setup"    -a "(__rsv_all_services)"
+complete -c rsv -f -n "__rsv_cmd_is log-setup"    -a "(__rsv_no_log_services)"
 complete -c rsv -f -n "__rsv_cmd_is log-remove"   -a "(__rsv_all_services)"
-complete -c rsv -f -n "__rsv_cmd_is finish-setup" -a "(__rsv_all_services)"
+complete -c rsv -f -n "__rsv_cmd_is finish-setup" -a "(__rsv_no_finish_services)"
 
 complete -c rsv -f -n "__rsv_cmd_is logs; and not contains -- --errors (commandline -opc)" \
     -a "--errors" -d "show only error/warn/crit/fail lines"

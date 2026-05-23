@@ -27,10 +27,14 @@ NC='\033[0m'
 _disable_color=0
 [[ -n "${NO_COLOR-}" ]] && _disable_color=1
 [[ ! -t 1 ]] && _disable_color=1
+[[ "${TERM-}" == "dumb" ]] && _disable_color=1
 if [[ $_disable_color -eq 0 && -n "$SUDO_USER" ]]; then
-    # sudo strips NO_COLOR — read it from the invoking shell's /proc environ
+    # sudo strips NO_COLOR — try to recover it from the parent shell's /proc environ.
+    # Guard: skip if parent is PID 1 (container init) or /proc is unavailable,
+    # since reading init's environ would give false negatives.
     _parent_pid=$(awk '/^PPid:/{print $2}' /proc/$PPID/status 2>/dev/null)
-    if [[ -n "$_parent_pid" ]] && tr '\0' '\n' < /proc/$_parent_pid/environ 2>/dev/null | grep -q '^NO_COLOR='; then
+    if [[ -n "$_parent_pid" && "$_parent_pid" -gt 1 ]] && \
+       tr '\0' '\n' < /proc/$_parent_pid/environ 2>/dev/null | grep -q '^NO_COLOR='; then
         _disable_color=1
     fi
     unset _parent_pid
@@ -59,18 +63,16 @@ _error_hint() {
 }
 # --- Mode selection -----------------------------------------------------------
 
-_detect_distro() {
-    [[ -f /etc/os-release ]] || return
-    local key val
-    while IFS='=' read -r key val; do
-        [[ "$key" == "ID" ]] && { echo "${val,,}"; return; }
-    done < /etc/os-release
-}
 USER_MODE=0
 for _a in "$@"; do [[ "$_a" == "--user" ]] && USER_MODE=1 && break; done
 [[ $EUID -ne 0 ]] && USER_MODE=1
 
-_DISTRO=$(_detect_distro)
+_DISTRO=""
+if [[ -f /etc/os-release ]]; then
+    while IFS='=' read -r _key _val; do
+        if [[ "$_key" == "ID" ]]; then _DISTRO="${_val,,}"; break; fi
+    done < /etc/os-release
+fi
 
 case "$_DISTRO" in
     void)    _SYS_SVDIRS=("/etc/sv") ;;
@@ -121,12 +123,14 @@ _ORIG_ARGS=("$@")
 NOW=0
 LOG_LEVEL=""
 LOG_LINES=10
+WATCH_INTERVAL=2
 WITH_LOG=0
 AS_USER=""
 _args=()
 _next_level=0
 _next_as_user=0
 _next_lines=0
+_next_interval=0
 for _a in "$@"; do
     if [[ $_next_level -eq 1 ]]; then
         LOG_LEVEL="${_a//,/|}"
@@ -137,6 +141,9 @@ for _a in "$@"; do
     elif [[ $_next_lines -eq 1 ]]; then
         LOG_LINES="$_a"
         _next_lines=0
+    elif [[ $_next_interval -eq 1 ]]; then
+        WATCH_INTERVAL="$_a"
+        _next_interval=0
     elif [[ "$_a" == "--user" ]]; then
         : # already handled above
     elif [[ "$_a" == "--now" ]]; then
@@ -154,6 +161,10 @@ for _a in "$@"; do
         _next_lines=1
     elif [[ "$_a" == --lines=* ]]; then
         LOG_LINES="${_a#--lines=}"
+    elif [[ "$_a" == "--interval" ]]; then
+        _next_interval=1
+    elif [[ "$_a" == --interval=* ]]; then
+        WATCH_INTERVAL="${_a#--interval=}"
     elif [[ "$_a" == "--as-user" ]]; then
         _next_as_user=1
     elif [[ "$_a" == --as-user=* ]]; then
@@ -174,7 +185,7 @@ if [[ "${debug:-0}" -eq 1 ]]; then
   _info "Functions called:"
   grep '^+FUNC:' "$_trace" | grep -oP '(?<=\+FUNC:)[^:]+(?=:)' | awk '{count[$0]++} END {for (f in count) print count[f], f}' | sort -rn
   rm -f "$_trace"
-  _info ARGS
+  _info ARGS:
   echo "LOG_FILE $LOG_FILE"
   echo "RUNSVDIR $RUNSVDIR"
   echo "_SVDIRS $_SVDIRS"
@@ -217,10 +228,8 @@ fi
 _reexec_as_root() {
     local escalator
     if command -v sudo >/dev/null 2>&1; then
-    echo reruning as root
         escalator="sudo"
     elif command -v doas >/dev/null 2>&1; then
-    echo trying  as root
         escalator="doas"
     else
         return 1
@@ -403,13 +412,7 @@ cmd_init() {
     _ok "user runsvdir started (PID $!)"
     _info "tip: add 'rsv --user init' to your session startup (~/.profile, ~/.xinitrc, etc.)"
 }
-check_run() {
-  if [ -s "$RUNSVDIR/$1/supervise/pid" ]; then
-    return 0
-  else
-    return 1
-  fi
-}
+check_run() { [[ -s "$RUNSVDIR/$1/supervise/pid" ]]; }
 _fmt_uptime() {
     local s=$1
     local -n _out=$2
@@ -417,9 +420,10 @@ _fmt_uptime() {
     local h=$(( (s % 86400) / 3600 ))
     local m=$(( (s % 3600) / 60 ))
     local r=$(( s % 60 ))
-    if   (( d > 0 )); then _out="${d}d$(printf '%02d' $h)h"
-    elif (( h > 0 )); then _out="${h}h$(printf '%02d' $m)m"
-    elif (( m > 0 )); then _out="${m}m$(printf '%02d' $r)s"
+    local _p
+    if   (( d > 0 )); then printf -v _p '%02d' $h; _out="${d}d${_p}h"
+    elif (( h > 0 )); then printf -v _p '%02d' $m; _out="${h}h${_p}m"
+    elif (( m > 0 )); then printf -v _p '%02d' $r; _out="${m}m${_p}s"
     else _out="${r}s"
     fi
 }
@@ -473,8 +477,8 @@ cmd_enable() {
         if [[ $NOW -eq 1 ]]; then
             check_run "$1" && _error_hint "Already running" || :
             _wait_for "sv status '$RUNSVDIR/$svc' 2>&1 | grep -qE '^(run|down):'" 5 "$(_info Starting) '$svc'"
-            local out; out=$(_sv start "$svc" 2>&1) || _error "failed to start '$svc'"
-            local pid; pid=$(grep -oP '\(pid \K[0-9]+' <<< "$out")
+            _sv start "$svc" >/dev/null 2>&1 || _error "failed to start '$svc'"
+            local pid; pid=$(cat "$RUNSVDIR/$svc/supervise/pid" 2>/dev/null)
             _ok "started '$svc'${pid:+ (pid $pid)}"
         fi
 
@@ -486,10 +490,9 @@ cmd_enable() {
     _ok "enabled '$svc'"
 
     [[ $NOW -ne 1 ]] && return 0
-    _wait_for "sv status '$RUNSVDIR/$svc' 2>&1 | grep -qE '^(run|down):'" 5 " $(_info Starting )  '$svc'"
-
-    local out; out=$(_sv start "$svc" 2>&1) || _error "failed to start '$svc'"
-    local pid; pid=$(grep -oP '\(pid \K[0-9]+' <<< "$out")
+    _wait_for "sv status '$RUNSVDIR/$svc' 2>&1 | grep -qE '^(run|down):'" 5 "$(_info Starting) '$svc'"
+    _sv start "$svc" >/dev/null 2>&1 || _error "failed to start '$svc'"
+    local pid; pid=$(cat "$RUNSVDIR/$svc/supervise/pid" 2>/dev/null)
     _ok "started '$svc'${pid:+ (pid $pid)}"
 }
 cmd_disable() {
@@ -514,6 +517,9 @@ cmd_edit() {
 
 cmd_new() {
     local name="$1"
+    [[ -z "$name" ]] && _error "service name required"
+    [[ "$name" =~ [[:space:]/] ]] && _error "invalid service name '$name': must not contain spaces or slashes"
+    [[ "$name" =~ ^[-.] ]] && _error "invalid service name '$name': must not start with '.' or '-'"
     [[ -d "$SVDIR/$name" ]] && _error "service '$name' already exists in $SVDIR"
     mkdir -p "$SVDIR/$name"
     cat > "$SVDIR/$name/run" << 'RUNEOF'
@@ -563,7 +569,7 @@ cmd_doctor() {
         fi
     fi
 
-    # Check for dangling symlinks in RUNSVDIR
+    # Check each symlink in RUNSVDIR: dangling, missing run script, down state
     if [[ -d "$RUNSVDIR" ]]; then
         for link in "$RUNSVDIR"/*; do
             [[ -L "$link" ]] || continue
@@ -573,18 +579,8 @@ cmd_doctor() {
             if [[ ! -e "$link" ]]; then
                 echo -e "  ${RED}[fail]${NC} dangling symlink: $name → $(readlink "$link") (target missing)"
                 (( issues++ ))
+                continue
             fi
-        done
-    fi
-
-    # Check each enabled service for missing/non-executable run script and down state
-    if [[ -d "$RUNSVDIR" ]]; then
-        for link in "$RUNSVDIR"/*; do
-            [[ -L "$link" && -e "$link" ]] || continue
-            local name
-            name="${link##*/}"
-            _is_internal "$name" && continue
-
             local _svdir=$_SV_FOUND_DIR
             local run="${_svdir:-$SVDIR}/$name/run"
             if [[ ! -f "$run" ]]; then
@@ -594,13 +590,21 @@ cmd_doctor() {
                 echo -e "  ${RED}[fail]${NC} $name: run script is not executable ($run)"
                 (( issues++ ))
             fi
-
             local out
             out=$(_sv status "$name" 2>/dev/null)
-            if echo "$out" | grep -q "run:"; then
-                : # up, already covered by run script check
-            else
-                echo -e "  ${YELLOW}[warn]${NC} $name: service is down"
+            [[ "$out" != *"run:"* ]] && echo -e "  ${YELLOW}[warn]${NC} $name: service is down"
+
+            # Check if log/run exists but runsv isn't supervising it
+            local _svcdir
+            _svcdir=$(readlink -f "$link")
+            if [[ -f "$_svcdir/log/run" ]]; then
+                local log_out
+                log_out=$(sv status "$_svcdir/log" 2>&1)
+                if [[ "$log_out" == *"unable to open supervise"* ]]; then
+                    echo -e "  ${YELLOW}[warn]${NC} $name: log service exists but supervisor isn't managing it"
+                    _hint "restart supervision: rsv disable $name && rsv enable --now $name"
+                    (( issues++ ))
+                fi
             fi
         done
     fi
@@ -649,7 +653,7 @@ LOGEOF
         rm "$RUNSVDIR/$name"
         # Wait for runsv to exit (supervise/ok becomes inaccessible)
         local waited=0
-        while sv status "$_svdir/$name" 2>&1 | grep -qv "unable to open supervise"; do
+        while [[ "$(sv status "$_svdir/$name" 2>&1)" != *"unable to open supervise"* ]]; do
             sleep 0.3
             (( waited++ ))
             [[ $waited -gt 20 ]] && break
@@ -680,7 +684,7 @@ cmd_log_remove() {
         _info "restarting supervision to deactivate log service..."
         rm "$RUNSVDIR/$name"
         local waited=0
-        while sv status "$_svdir/$name" 2>&1 | grep -qv "unable to open supervise"; do
+        while [[ "$(sv status "$_svdir/$name" 2>&1)" != *"unable to open supervise"* ]]; do
             sleep 0.3
             (( waited++ ))
             [[ $waited -gt 20 ]] && break
@@ -700,7 +704,7 @@ cmd_once() {
 
 cmd_watch() {
     local svc="$1"
-    local interval=2
+    local interval="$WATCH_INTERVAL"
     while true; do
         clear
         echo -e "${BOLD}rsv watch${NC} — every ${interval}s — $(date)"
@@ -769,7 +773,7 @@ cmd_logs() {
             [[ ! -f "$log_run" ]] && _info "tip: run 'rsv log-setup $1' to enable per-service logging"
             tail -n "$((LOG_LINES * 100))" "$LOG_FILE" | grep -av '\[sudo\]' | grep -ai "$1" | _lgrep | tail -"$LOG_LINES" | _colorize_log
             _info "following new entries (Ctrl-C to stop)..."
-            tail -f "$LOG_FILE" | grep --line-buffered -av '\[sudo\]' | grep --line-buffered -ai "$1" | _lgrep_live | _colorize_log
+            tail -fn0 "$LOG_FILE" | grep --line-buffered -av '\[sudo\]' | grep --line-buffered -ai "$1" | _lgrep_live | _colorize_log
         else
             _error "no per-service log found and no global log at $LOG_FILE"
         fi
@@ -879,6 +883,7 @@ usage() {
     echo "  --level <levels>    with logs: filter by level e.g. --level error,warn"
     echo "  --lines <N>         with logs: show last N matching lines (default 10)"
     echo "  --log               with new: also scaffold a log service"
+    echo "  --interval <N>      with watch: refresh every N seconds (default 2)"
     echo ""
     echo -e "${BOLD}commands:${NC}"
     echo "  init                start the user runsvdir supervisor (user mode only)"
@@ -895,7 +900,7 @@ usage() {
     echo "  new     <service>   scaffold a new service (--log to include log service)"
     echo "  doctor              check for common runit configuration problems"
     echo "  once    <service>   run a service once without supervision"
-    echo "  watch   [service]   auto-refreshing status (Ctrl-C to stop)"
+    echo "  watch   [service]   auto-refreshing status (--interval N, default 2s)"
     echo "  log-setup  <service> add a svlogd log service to an existing service"
     echo "  log-remove <service> remove the svlogd log service from a service"
     echo "  finish-setup <service> scaffold a finish script for a service"

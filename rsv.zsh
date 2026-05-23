@@ -73,6 +73,40 @@ _rsv() {
         fi
         _describe 'service' names descs
     }
+    _rsv_no_log() {
+        local -a names descs _d svc
+        for _d in "${svdirs[@]}"; do
+            [[ -d "$_d" ]] || continue
+            for svc in $(ls "$_d" 2>/dev/null | grep -v 'current\|supervise\|\.supervisor'); do
+                [[ -f "$_d/$svc/log/run" ]] && continue
+                names+=("$svc"); descs+=("root")
+            done
+        done
+        if [[ -d "$user_svdir" ]]; then
+            for svc in $(ls "$user_svdir" 2>/dev/null | grep -v 'current\|supervise\|\.supervisor'); do
+                [[ -f "$user_svdir/$svc/log/run" ]] && continue
+                names+=("$svc"); descs+=("user")
+            done
+        fi
+        _describe 'service' names descs
+    }
+    _rsv_no_finish() {
+        local -a names descs _d svc
+        for _d in "${svdirs[@]}"; do
+            [[ -d "$_d" ]] || continue
+            for svc in $(ls "$_d" 2>/dev/null | grep -v 'current\|supervise\|\.supervisor'); do
+                [[ -f "$_d/$svc/finish" ]] && continue
+                names+=("$svc"); descs+=("root")
+            done
+        done
+        if [[ -d "$user_svdir" ]]; then
+            for svc in $(ls "$user_svdir" 2>/dev/null | grep -v 'current\|supervise\|\.supervisor'); do
+                [[ -f "$user_svdir/$svc/finish" ]] && continue
+                names+=("$svc"); descs+=("user")
+            done
+        fi
+        _describe 'service' names descs
+    }
     _rsv_disabled() {
         local -a names descs _d svc
         for _d in "${svdirs[@]}"; do
@@ -116,15 +150,28 @@ _rsv() {
                         '*: :->svcs'
                     [[ $state == svcs ]] && _rsv_disabled
                     ;;
-                start|stop|restart|reload|disable|status|once|watch|logs)
+                start|stop|restart|reload|disable|status|once|logs)
                     _rsv_enabled
                     ;;
-                edit|log-setup|log-remove|finish-setup)
+                watch)
+                    _arguments \
+                        '--interval[refresh every N seconds (default 2)]:seconds:' \
+                        '*: :->svcs'
+                    [[ $state == svcs ]] && _rsv_enabled
+                    ;;
+                edit|log-remove)
                     _rsv_all
+                    ;;
+                log-setup)
+                    _rsv_no_log
+                    ;;
+                finish-setup)
+                    _rsv_no_finish
                     ;;
                 new)
                     _arguments \
                         '--log[also scaffold a log service]' \
+                        '--user[create in user service directory]' \
                         '*: :'
                     ;;
             esac
