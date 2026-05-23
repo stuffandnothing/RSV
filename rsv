@@ -855,6 +855,18 @@ cmd_list() {
     local -A _seen=()
     local _any_dir=0
     local _dir
+
+    # For -u: batch one sv call across all enabled services, parse into a map
+    local -A _sv_status=()
+    if [[ $LIST_UPTIME -eq 1 && -d "$RUNSVDIR" ]]; then
+        local _line _path _svcname
+        while IFS= read -r _line; do
+            _path="${_line#*: }"; _path="${_path%%:*}"
+            _svcname="${_path##*/}"
+            _sv_status["$_svcname"]="$_line"
+        done < <(sv status "$RUNSVDIR"/*/ 2>/dev/null)
+    fi
+
     for _dir in "${_dirs[@]}"; do
         [[ -d "$_dir" ]] || continue
         _any_dir=1
@@ -866,8 +878,7 @@ cmd_list() {
             _seen["$svc"]=1
             if [[ -L "$RUNSVDIR/$svc" ]]; then
                 if [[ $LIST_UPTIME -eq 1 ]]; then
-                    local out
-                    out=$(_sv status "$svc" 2>/dev/null)
+                    local out="${_sv_status[$svc]:-}"
                     if [[ "$out" == *"run:"* ]]; then
                         local uptime uptime_str
                         _parse_uptime "$out" uptime
