@@ -32,12 +32,15 @@ if [[ $_disable_color -eq 0 && -n "$SUDO_USER" ]]; then
     # sudo strips NO_COLOR — try to recover it from the parent shell's /proc environ.
     # Guard: skip if parent is PID 1 (container init) or /proc is unavailable,
     # since reading init's environ would give false negatives.
-    _parent_pid=$(awk '/^PPid:/{print $2}' /proc/$PPID/status 2>/dev/null)
+    _parent_pid=""
+    while IFS=': ' read -r _k _v _; do
+        [[ "$_k" == "PPid" ]] && { _parent_pid="$_v"; break; }
+    done < /proc/$PPID/status 2>/dev/null
     if [[ -n "$_parent_pid" && "$_parent_pid" -gt 1 ]] && \
-       tr '\0' '\n' < /proc/$_parent_pid/environ 2>/dev/null | grep -q '^NO_COLOR='; then
+       grep -qz '^NO_COLOR=' /proc/$_parent_pid/environ 2>/dev/null; then
         _disable_color=1
     fi
-    unset _parent_pid
+    unset _parent_pid _k _v
 fi
 if [[ $_disable_color -eq 1 ]]; then
     RED='' GREEN='' YELLOW='' BLUE='' BOLD='' NC=''
@@ -200,7 +203,6 @@ fi
 
 set -- "${_args[@]}"
 
-# Apply --as-user: validate, override paths, check access
 if [[ -n "$AS_USER" ]]; then
     _as_home=$(getent passwd "$AS_USER" 2>/dev/null | cut -d: -f6)
     [[ -z "$_as_home" ]] && _error "user '$AS_USER' not found"
@@ -863,17 +865,19 @@ cmd_list() {
             [[ -v _seen["$svc"] ]] && continue
             _seen["$svc"]=1
             if [[ -L "$RUNSVDIR/$svc" ]]; then
-                local out
-                out=$(_sv status "$svc" 2>/dev/null)
-                if [[ "$out" == *"run:"* ]]; then
-                    if [[ $LIST_UPTIME -eq 1 ]]; then
+                if [[ $LIST_UPTIME -eq 1 ]]; then
+                    local out
+                    out=$(_sv status "$svc" 2>/dev/null)
+                    if [[ "$out" == *"run:"* ]]; then
                         local uptime uptime_str
                         _parse_uptime "$out" uptime
                         _fmt_uptime "$uptime" uptime_str
                         echo -e "  ${GREEN}[enabled/up]  ${NC} $svc ($uptime_str)"
                     else
-                        echo -e "  ${GREEN}[enabled/up]  ${NC} $svc"
+                        echo -e "  ${YELLOW}[enabled/down]${NC} $svc"
                     fi
+                elif check_run "$svc"; then
+                    echo -e "  ${GREEN}[enabled/up]  ${NC} $svc"
                 else
                     echo -e "  ${YELLOW}[enabled/down]${NC} $svc"
                 fi
