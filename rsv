@@ -861,9 +861,9 @@ cmd_list() {
     if [[ $LIST_UPTIME -eq 1 && -d "$RUNSVDIR" ]]; then
         local _line _path _svcname
         while IFS= read -r _line; do
-            _path="${_line#*: }"; _path="${_path%%:*}"
+            _path="${_line#*: }"; _path="${_path%%:*}"; _path="${_path%/}"
             _svcname="${_path##*/}"
-            _sv_status["$_svcname"]="$_line"
+            [[ -n "$_svcname" ]] && _sv_status["$_svcname"]="$_line"
         done < <(sv status "$RUNSVDIR"/*/ 2>/dev/null)
     fi
 
