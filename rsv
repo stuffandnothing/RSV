@@ -413,6 +413,18 @@ cmd_init() {
     _info "tip: add 'rsv --user init' to your session startup (~/.profile, ~/.xinitrc, etc.)"
 }
 check_run() { [[ -s "$RUNSVDIR/$1/supervise/pid" ]]; }
+# Extract uptime seconds from "sv status" output into a nameref variable.
+# Matches "(pid N) NNNs" to handle complex output like:
+#   run: svc: (pid 2242) 48914s; down: log: 0s, normally up, want up
+_parse_uptime() {
+    local _raw="$1"
+    local -n _usecs="$2"
+    if [[ "$_raw" =~ \(pid\ [0-9]+\)\ ([0-9]+)s ]]; then
+        _usecs="${BASH_REMATCH[1]}"
+    else
+        _usecs="0"
+    fi
+}
 _fmt_uptime() {
     local s=$1
     local -n _out=$2
@@ -794,7 +806,7 @@ cmd_status() {
         if [[ "$out" == *"run:"* ]]; then
         _info $1 status
             local pid; pid=$(cat "$RUNSVDIR/$1/supervise/pid" 2>/dev/null)
-            local uptime="${out##* }"; uptime="${uptime%s}"
+            local uptime; _parse_uptime "$out" uptime
             _fmt_uptime "$uptime" uptime_str
             echo -e "${GREEN}  [up]${NC} $1${pid:+ (pid $pid)}, ($uptime_str)"
         else
@@ -818,7 +830,7 @@ cmd_status() {
             local out uptime_str
             out=$(_sv status "$svc" 2>/dev/null)
             if [[ "$out" == *"run:"* ]]; then
-                local uptime="${out##* }"; uptime="${uptime%s}"
+                local uptime; _parse_uptime "$out" uptime
                 _fmt_uptime "$uptime" uptime_str
                 echo -e "  ${GREEN}[up]  ${NC} $svc ($uptime_str)"
             else
@@ -851,9 +863,9 @@ cmd_list() {
                 local out
                 out=$(_sv status "$svc" 2>/dev/null)
                 if [[ "$out" == *"run:"* ]]; then
-                    local uptime_str
-local uptime="${out##* }"; uptime="${uptime%s}"
-_fmt_uptime "$uptime" uptime_str
+                    local uptime uptime_str
+                    _parse_uptime "$out" uptime
+                    _fmt_uptime "$uptime" uptime_str
 echo -e "  ${GREEN}[enabled/up]  ${NC} $svc ($uptime_str)"
                 else
                     echo -e "  ${YELLOW}[enabled/down]${NC} $svc"
