@@ -1,7 +1,6 @@
 # Todo
 
 ## Completions
-- [x] Detect `sudo`/`doas` in completions to offer system services instead of user services
 - [ ] `finish-setup` completion should only suggest services that don't already have a `finish` script
 - [ ] `log-setup` completion should only suggest services without an existing `log/run`
 
@@ -13,6 +12,7 @@
 - [ ] Check if a service has `log/run` but the log supervisor is down (runsv not managing it)
 
 ## Misc
-- [ ] `rsv disable` doesn't wait for the service to fully stop before removing the symlink
+- [x] `rsv disable` doesn't wait for the service to fully stop before removing the symlink
 - [ ] `rsv new` doesn't validate the service name (spaces, slashes, etc.)
 - [ ] NO_COLOR detection via `/proc` may not work in containers — fallback needed
+- [x] Debug code

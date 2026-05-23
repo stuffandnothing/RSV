@@ -1,7 +1,7 @@
 #!/bin/bash
 # rsv - runit service manager wrapper
 # Usage: rsv [--user] <command> [service]
-
+[[ -n "$_RSV_DEBUG" ]] && PS4='+FUNC:${FUNCNAME[0]}:${LINENO}: ' && set -x
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -46,10 +46,11 @@ _error_hint() {
 # --- Mode selection -----------------------------------------------------------
 
 _detect_distro() {
-    if [[ -f /etc/os-release ]]; then
-        source /etc/os-release
-        echo "${ID,,}"
-    fi
+    [[ -f /etc/os-release ]] || return
+    local key val
+    while IFS='=' read -r key val; do
+        [[ "$key" == "ID" ]] && { echo "${val,,}"; return; }
+    done < /etc/os-release
 }
 USER_MODE=0
 for _a in "$@"; do [[ "$_a" == "--user" ]] && USER_MODE=1 && break; done
@@ -143,12 +144,26 @@ for _a in "$@"; do
         _next_as_user=1
     elif [[ "$_a" == --as-user=* ]]; then
         AS_USER="${_a#--as-user=}"
+    elif [[ "$_a" == "--debug" ]]; then
+        debug=1   
     else
         _args+=("$_a")
     fi
 done
+if [[ "${debug:-0}" -eq 1 ]]; then
+  new_args=()
+  for a in "${_ORIG_ARGS[@]}"; do
+    [[ "$a" == "--debug" ]] || new_args+=("$a")
+  done
+  _trace=/tmp/rsv_trace_$$
+  _RSV_DEBUG=1 bash "$0" "${new_args[@]}" 2>"$_trace"
+  echo "==> Functions called:"
+  grep '^+FUNC:' "$_trace" | grep -oP '(?<=\+FUNC:)[^:]+(?=:)' | awk '{count[$0]++} END {for (f in count) print count[f], f}' | sort -rn
+  rm -f "$_trace"
+  exit
+fi
+
 set -- "${_args[@]}"
-unset _args _a _next_level _next_as_user _next_lines
 
 # Apply --as-user: validate, override paths, check access
 if [[ -n "$AS_USER" ]]; then
@@ -213,7 +228,32 @@ _needs_root() {
     done
     return 1
 }
+_wait_for() {
+    local cmd=$1
+    local timeout=${2:-5}
+    local msg=${3:-"Waiting"}
+    local spin='|/-\\'
+    local i=0
+    local elapsed=0
 
+    printf "\r%s %s" "$msg" "${spin:$i:1}"
+    i=$(( (i + 1) % 4 ))
+    sleep 0.1
+
+    while ! eval "$cmd" >/dev/null 2>&1; do
+        printf "\r%s %s" "$msg" "${spin:$i:1}"
+        i=$(( (i + 1) % 4 ))
+        sleep 0.1
+        elapsed=$(( elapsed + 1 ))
+        if (( elapsed >= timeout * 10 )); then
+            printf "\r%s timeout\n" "$msg"
+            return 1
+        fi
+    done
+
+    printf "\r%s done\n" "$msg"
+    return 0
+}
 _check_service_exists() {
     local _dirs=("${_SVDIRS[@]:-$SVDIR}")
     local _dir
@@ -271,7 +311,7 @@ _suggest_service() {
         for svc in "$_dir"/*/; do
             [[ -d "$svc" ]] || continue
             local name
-            name=$(basename "$svc")
+            name="${svc%/}"; name="${name##*/}"
             _is_internal "$name" && continue
             for (( i=0; i<len; i++ )); do
                 [[ "${input:0:i}${input:i+1}" == "$name" ]] && { echo "$name"; return; }
@@ -342,62 +382,90 @@ cmd_init() {
     _ok "user runsvdir started (PID $!)"
     _info "tip: add 'rsv --user init' to your session startup (~/.profile, ~/.xinitrc, etc.)"
 }
-
+check_run() {
+  if [ -s "$RUNSVDIR/$1/supervise/pid" ]; then
+    return 0
+  else
+    return 1
+  fi
+}
 # --- Service commands ---------------------------------------------------------
 
 cmd_start() {
     _check_service_exists "$1"
     _check_service_enabled "$1"
-    _sv start "$1" && _ok "started '$1'" || _error "failed to start '$1'"
+    check_run "$1" && _error_hint "Already running" || :
+    _sv start "$1" >/dev/null 2>&1 || _error "failed to start '$1'"
+    _wait_for "sv status '$RUNSVDIR/$1' 2>&1 | grep -q '^run:'" 5 "$(_info Starting) '$1'"
+    local pid; pid=$(cat "$RUNSVDIR/$1/supervise/pid" 2>/dev/null)
+    _ok "started '$1'${pid:+ (pid $pid)}"
 }
 
 cmd_stop() {
     _check_service_exists "$1"
     _check_service_enabled "$1"
-    _sv stop "$1" && _ok "stopped '$1'" || _error "failed to stop '$1'"
+    check_run "$1" && : || _error_hint "Not running"
+    local pid; pid=$(cat "$RUNSVDIR/$1/supervise/pid" 2>/dev/null)
+    _sv stop "$1" >/dev/null 2>&1 || _error "failed to stop '$1'"
+    _wait_for "sv status '$RUNSVDIR/$1' 2>&1 | grep -q '^down:'" 5 "$(_info Stopping) '$1'"
+    _ok "stopped '$1'${pid:+ (pid $pid)}"
 }
 
 cmd_restart() {
     _check_service_exists "$1"
     _check_service_enabled "$1"
-    _sv restart "$1" && _ok "restarted '$1'" || _error "failed to restart '$1'"
+    local old_pid; old_pid=$(cat "$RUNSVDIR/$1/supervise/pid" 2>/dev/null)
+    _sv restart "$1" >/dev/null 2>&1 || _error "failed to restart '$1'"
+    _wait_for "[[ -s '$RUNSVDIR/$1/supervise/pid' ]] && [[ \$(cat '$RUNSVDIR/$1/supervise/pid') != '$old_pid' ]]" 8 "$(_info Restarting) '$1'"
+    local pid; pid=$(cat "$RUNSVDIR/$1/supervise/pid" 2>/dev/null)
+    _ok "restarted '$1'${pid:+ (pid $pid)}"
 }
 
 cmd_reload() {
     _check_service_exists "$1"
     _check_service_enabled "$1"
-    _sv reload "$1" && _ok "reloaded '$1'" || _error "failed to reload '$1' (service may not support reload)"
+    _sv reload "$1" >/dev/null && _ok "reloaded '$1'" || _error "failed to reload '$1' (service may not support reload)"
 }
 
 cmd_enable() {
     _check_service_exists "$1"
-    local _svdir=$_SV_FOUND_DIR
-    if [[ -L "$RUNSVDIR/$1" ]]; then
-        _warn "service '$1' is already enabled"
-        [[ $NOW -eq 1 ]] && { _sv start "$1" && _ok "started '$1'" || _error "failed to start '$1'"; }
+
+    local svc="$1"
+    local svdir="$_SV_FOUND_DIR"
+
+    if [[ -L "$RUNSVDIR/$svc" ]]; then
+        _warn "service '$svc' is already enabled"
+
+        if [[ $NOW -eq 1 ]]; then
+            check_run "$1" && _error_hint "Already running" || :
+            _wait_for "sv status '$RUNSVDIR/$svc' 2>&1 | grep -qE '^(run|down):'" 5 "$(_info Starting) '$svc'"
+            local out; out=$(_sv start "$svc" 2>&1) || _error "failed to start '$svc'"
+            local pid; pid=$(grep -oP '\(pid \K[0-9]+' <<< "$out")
+            _ok "started '$svc'${pid:+ (pid $pid)}"
+        fi
+
         exit 0
     fi
-    mkdir -p "$RUNSVDIR"
-    ln -s "$_svdir/$1" "$RUNSVDIR/$1"
-    _ok "enabled '$1'"
-    if [[ $NOW -eq 1 ]]; then
-        local waited=0
-        while sv status "$_svdir/$1" 2>&1 | grep -q "unable to open supervise"; do
-            sleep 0.2
-            (( waited++ ))
-            [[ $waited -gt 25 ]] && break
-        done
-        _sv start "$1" && _ok "started '$1'" || _error "failed to start '$1'"
-    fi
-}
 
+    mkdir -p "$RUNSVDIR"
+    ln -s "$svdir/$svc" "$RUNSVDIR/$svc"
+    _ok "enabled '$svc'"
+
+    [[ $NOW -ne 1 ]] && return 0
+    _wait_for "sv status '$RUNSVDIR/$svc' 2>&1 | grep -qE '^(run|down):'" 5 " $(_info Starting )  '$svc'"
+
+    local out; out=$(_sv start "$svc" 2>&1) || _error "failed to start '$svc'"
+    local pid; pid=$(grep -oP '\(pid \K[0-9]+' <<< "$out")
+    _ok "started '$svc'${pid:+ (pid $pid)}"
+}
 cmd_disable() {
     _check_service_exists "$1"
     if [[ ! -L "$RUNSVDIR/$1" ]]; then
         _warn "service '$1' is not enabled"
         exit 0
     fi
-    _sv stop "$1" 2>/dev/null
+    _sv stop "$1" >/dev/null 2>&1
+    _wait_for "sv status '$RUNSVDIR/$1' 2>&1 | grep -q '^down:'" 5 "$(_info Stopping) '$1'"
     rm "$RUNSVDIR/$1"
     _ok "disabled '$1'"
 }
@@ -437,7 +505,8 @@ LOGEOF
         _ok "created log service → $logdest"
     fi
 
-    _info "edit the run script:  rsv edit $name"
+    read -rp "Edit run script now? [y/N] " _ans
+    [[ "${_ans,,}" == y ]] && "$(_editor)" "$SVDIR/$name/run"
     _info "enable when ready:    rsv enable $name"
 }
 
@@ -465,7 +534,7 @@ cmd_doctor() {
         for link in "$RUNSVDIR"/*; do
             [[ -L "$link" ]] || continue
             local name
-            name=$(basename "$link")
+            name="${link##*/}"
             _is_internal "$name" && continue
             if [[ ! -e "$link" ]]; then
                 echo -e "  ${RED}[fail]${NC} dangling symlink: $name → $(readlink "$link") (target missing)"
@@ -479,7 +548,7 @@ cmd_doctor() {
         for link in "$RUNSVDIR"/*; do
             [[ -L "$link" && -e "$link" ]] || continue
             local name
-            name=$(basename "$link")
+            name="${link##*/}"
             _is_internal "$name" && continue
 
             local _svdir=$_SV_FOUND_DIR
@@ -592,7 +661,7 @@ cmd_log_remove() {
 cmd_once() {
     _check_service_exists "$1"
     _check_service_enabled "$1"
-    _sv once "$1" && _ok "running '$1' once (will not restart)" || _error "failed to signal '$1'"
+    _sv once "$1" >/dev/null && _ok "running '$1' once (will not restart)" || _error "failed to signal '$1'"
 }
 
 cmd_watch() {
@@ -634,7 +703,8 @@ exit 0
 FINEOF
     chmod +x "$finish"
     _ok "created finish script at $finish"
-    _info "edit it: $(_editor) $finish"
+    read -rp "Edit finish script now? [y/N] " _ans
+    [[ "${_ans,,}" == y ]] && "$(_editor)" "$finish"
 }
 
 cmd_logs() {
@@ -701,7 +771,7 @@ cmd_status() {
         fi
         for svc in "$RUNSVDIR"/*/; do
             [[ -d "$svc" ]] || continue
-            svc=$(basename "$svc")
+            svc="${svc%/}"; svc="${svc##*/}"
             _is_internal "$svc" && continue
             local out
             out=$(_sv status "$svc" 2>/dev/null)
@@ -729,7 +799,7 @@ cmd_list() {
         _any_dir=1
         for svc in "$_dir"/*/; do
             [[ -d "$svc" ]] || continue
-            svc=$(basename "$svc")
+            svc="${svc%/}"; svc="${svc##*/}"
             _is_internal "$svc" && continue
             [[ -v _seen["$svc"] ]] && continue
             _seen["$svc"]=1
@@ -785,9 +855,9 @@ usage() {
     echo "  log-remove <service> remove the svlogd log service from a service"
     echo "  finish-setup <service> scaffold a finish script for a service"
     echo ""
-    echo -e "${BOLD}system paths (root):${NC}"
-    echo "  sv dir:   /etc/runit/sv"
-    echo "  run dir:  /etc/runit/runsvdir/default"
+    echo -e "${BOLD} Assumed system paths (root):${NC}"
+    echo "  sv dir:   $SVDIR"
+    echo "  run dir:  $RUNSVDIR"
     echo ""
     echo -e "${BOLD}user paths:${NC}"
     echo "  sv dir:   ~/.runit/sv          (override: \$RUNIT_SVDIR)"
@@ -825,3 +895,4 @@ case "$1" in
     finish-setup) [[ -z "$2" ]] && usage || cmd_finish_setup "$2" ;;
     *)            usage ;;
 esac
+
