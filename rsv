@@ -1,6 +1,20 @@
 #!/bin/bash
-# rsv - runit service manager wrapper
-# Usage: rsv [--user] <command> [service]
+# rsv - runit service manager
+# Copyright (C) 2026 cyridge@proton.me
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, see <https://www.gnu.org/licenses/>.
+
 [[ -n "$_RSV_DEBUG" ]] && PS4='+FUNC:${FUNCNAME[0]}:${LINENO}: ' && set -x
 # Colors
 RED='\033[0;31m'
@@ -157,9 +171,16 @@ if [[ "${debug:-0}" -eq 1 ]]; then
   done
   _trace=/tmp/rsv_trace_$$
   _RSV_DEBUG=1 bash "$0" "${new_args[@]}" 2>"$_trace"
-  echo "==> Functions called:"
+  _info "Functions called:"
   grep '^+FUNC:' "$_trace" | grep -oP '(?<=\+FUNC:)[^:]+(?=:)' | awk '{count[$0]++} END {for (f in count) print count[f], f}' | sort -rn
   rm -f "$_trace"
+  _info ARGS
+  echo "LOG_FILE $LOG_FILE"
+  echo "RUNSVDIR $RUNSVDIR"
+  echo "_SVDIRS $_SVDIRS"
+  echo "SVDIR $SVDIR"
+  echo "Distro $_DISTRO"
+  echo "USER_MODE $USER_MODE"
   exit
 fi
 
@@ -388,6 +409,19 @@ check_run() {
   else
     return 1
   fi
+}
+_fmt_uptime() {
+    local s=$1
+    local -n _out=$2
+    local d=$(( s / 86400 ))
+    local h=$(( (s % 86400) / 3600 ))
+    local m=$(( (s % 3600) / 60 ))
+    local r=$(( s % 60 ))
+    if   (( d > 0 )); then _out="${d}d$(printf '%02d' $h)h"
+    elif (( h > 0 )); then _out="${h}h$(printf '%02d' $m)m"
+    elif (( m > 0 )); then _out="${m}m$(printf '%02d' $r)s"
+    else _out="${r}s"
+    fi
 }
 # --- Service commands ---------------------------------------------------------
 
@@ -751,15 +785,19 @@ cmd_status() {
     if [[ -n "$1" ]]; then
         _check_service_exists "$1"
         _check_service_enabled "$1"
-        local out
+        local out uptime_str
         out=$(_sv status "$1" 2>&1)
-        if echo "$out" | grep -q "run:"; then
-            echo -e "${GREEN}${out}${NC}"
+        if [[ "$out" == *"run:"* ]]; then
+        _info $1 status
+            local pid; pid=$(cat "$RUNSVDIR/$1/supervise/pid" 2>/dev/null)
+            local uptime="${out##* }"; uptime="${uptime%s}"
+            _fmt_uptime "$uptime" uptime_str
+            echo -e "${GREEN}  [up]${NC} $1${pid:+ (pid $pid)}, ($uptime_str)"
         else
-            echo -e "${RED}${out}${NC}"
+            echo -e "${RED}  [down]${NC} $1"
         fi
-        echo ""
         if [[ -f "$LOG_FILE" ]]; then
+            echo ""
             _info "Recent log entries:"
             grep -ai "$1" "$LOG_FILE" | grep -av '\[sudo\]' | grep -ai "error\|warn\|fail\|crit" | tail -10 | _colorize_log
         fi
@@ -773,10 +811,12 @@ cmd_status() {
             [[ -d "$svc" ]] || continue
             svc="${svc%/}"; svc="${svc##*/}"
             _is_internal "$svc" && continue
-            local out
+            local out uptime_str
             out=$(_sv status "$svc" 2>/dev/null)
-            if echo "$out" | grep -q "run:"; then
-                echo -e "  ${GREEN}[up]  ${NC} $svc"
+            if [[ "$out" == *"run:"* ]]; then
+                local uptime="${out##* }"; uptime="${uptime%s}"
+                _fmt_uptime "$uptime" uptime_str
+                echo -e "  ${GREEN}[up]  ${NC} $svc ($uptime_str)"
             else
                 echo -e "  ${RED}[down]${NC} $svc"
             fi
@@ -806,8 +846,11 @@ cmd_list() {
             if [[ -L "$RUNSVDIR/$svc" ]]; then
                 local out
                 out=$(_sv status "$svc" 2>/dev/null)
-                if echo "$out" | grep -q "run:"; then
-                    echo -e "  ${GREEN}[enabled/up]  ${NC} $svc"
+                if [[ "$out" == *"run:"* ]]; then
+                    local uptime_str
+local uptime="${out##* }"; uptime="${uptime%s}"
+_fmt_uptime "$uptime" uptime_str
+echo -e "  ${GREEN}[enabled/up]  ${NC} $svc ($uptime_str)"
                 else
                     echo -e "  ${YELLOW}[enabled/down]${NC} $svc"
                 fi
@@ -816,7 +859,9 @@ cmd_list() {
             fi
         done
     done
-    [[ $_any_dir -eq 0 ]] && { _warn "service directory $SVDIR does not exist"; exit 0; }
+    # Option 3: one-liner noop
+    [[ $_any_dir -eq 0 ]] && { _warn "service directory $SVDIR does not exist"; exit 0; } || true
+
 }
 
 # --- Usage --------------------------------------------------------------------
