@@ -18,19 +18,19 @@ Before starting this project I wasn't aware of existing tools. Here's how they c
 
 | Tool | Language | Last Updated | Notes |
 |------|----------|-------------|-------|
-| [rsv](https://github.com/JojiiOfficial/rsv) | Rust | ~3 years ago | Abandoned |
-| [vsv](https://github.com/bahamas10/vsv) | Rust (rewrite of bash) | ~3 years ago | Void-focused, v2.0.0 never released |
+| [rsv](https://github.com/JojiiOfficial/rsv) | Rust | ~3 years ago | Abandoned, `list` is raw `sv status *` dump |
+| [vsv](https://github.com/bahamas10/vsv) | Rust (rewrite of bash) | ~3 years ago | Void-focused,  |
 | [rsm](https://gitea.artixlinux.org/linuxer/Runit-Service-Manager) | Bash | ~5 years ago | vsv fork for Artix, shows internal runit dirs as services |
 | [roonit](https://github.com/19742bytes/roonit) | ? | ? | |
 
 ### `list` benchmark (Artix, 47 services)
 
-| Tool | Time |
-|------|------|
-| `rsm` | ~168ms |
-| `rsv` | ~65ms |
-
-`rsv` is also the only one with smart tab completions, `doctor`, service scaffolding, log management, and works correctly in containers.
+| Tool | Time | Output |
+|------|------|--------|
+| `rsv` (JojiiOfficial) | ~14ms | Raw unsorted `sv status` dump, no colors, includes internal dirs |
+| `rsm` | ~168ms | Formatted, but includes `current`/`supervise` as services |
+| `rsv` (this) | ~28ms | Sorted, colored, filters internals, enabled/disabled distinction |
+| `rsv` (this) `-u` | ~37ms | Same + uptime |
 
 </details>
 
