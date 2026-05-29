@@ -449,7 +449,7 @@ _fmt_uptime() {
 cmd_start() {
     _check_service_exists "$1"
     _check_service_enabled "$1"
-    check_run "$1" && _error_hint "Already running" || :
+    check_run "$1" && _error_hint "'$1' is already running" || :
     _sv start "$1" >/dev/null 2>&1 || _error "failed to start '$1'"
     _wait_for "sv status '$RUNSVDIR/$1' 2>&1 | grep -q '^run:'" 5 "$(_info Starting) '$1'"
     local pid; pid=$(cat "$RUNSVDIR/$1/supervise/pid" 2>/dev/null)
@@ -459,7 +459,7 @@ cmd_start() {
 cmd_stop() {
     _check_service_exists "$1"
     _check_service_enabled "$1"
-    check_run "$1" && : || _error_hint "Not running"
+    check_run "$1" && : || _error_hint "'$1' is not running"
     local pid; pid=$(cat "$RUNSVDIR/$1/supervise/pid" 2>/dev/null)
     _sv stop "$1" >/dev/null 2>&1 || _error "failed to stop '$1'"
     _wait_for "sv status '$RUNSVDIR/$1' 2>&1 | grep -q '^down:'" 5 "$(_info Stopping) '$1'"
@@ -492,7 +492,7 @@ cmd_enable() {
         _warn "service '$svc' is already enabled"
 
         if [[ $NOW -eq 1 ]]; then
-            check_run "$1" && _error_hint "Already running" || :
+            check_run "$1" && _error_hint "'$1' is already running" || :
             _wait_for "sv status '$RUNSVDIR/$svc' 2>&1 | grep -qE '^(run|down):'" 5 "$(_info Starting) '$svc'"
             _sv start "$svc" >/dev/null 2>&1 || _error "failed to start '$svc'"
             local pid; pid=$(cat "$RUNSVDIR/$svc/supervise/pid" 2>/dev/null)
@@ -598,8 +598,9 @@ cmd_doctor() {
                 (( issues++ ))
                 continue
             fi
-            local _svdir=$_SV_FOUND_DIR
-            local run="${_svdir:-$SVDIR}/$name/run"
+            local _svcdir
+            _svcdir=$(readlink -f "$link")
+            local run="$_svcdir/run"
             if [[ ! -f "$run" ]]; then
                 echo -e "  ${RED}[fail]${NC} $name: missing run script at $run"
                 (( issues++ ))
@@ -612,8 +613,6 @@ cmd_doctor() {
             [[ "$out" != *"run:"* ]] && echo -e "  ${YELLOW}[warn]${NC} $name: service is down"
 
             # Check if log/run exists but runsv isn't supervising it
-            local _svcdir
-            _svcdir=$(readlink -f "$link")
             if [[ -f "$_svcdir/log/run" ]]; then
                 local log_out
                 log_out=$(sv status "$_svcdir/log" 2>&1)
@@ -809,7 +808,7 @@ cmd_status() {
         local out uptime_str
         out=$(_sv status "$1" 2>&1)
         if [[ "$out" == *"run:"* ]]; then
-        _info $1 status
+            _info "$1" status
             local pid; pid=$(cat "$RUNSVDIR/$1/supervise/pid" 2>/dev/null)
             local uptime; _parse_uptime "$out" uptime
             _fmt_uptime "$uptime" uptime_str
@@ -820,7 +819,13 @@ cmd_status() {
         if [[ -f "$LOG_FILE" ]]; then
             echo ""
             _info "Recent log entries:"
-            grep -ai "$1" "$LOG_FILE" | grep -av '\[sudo\]' | grep -ai "error\|warn\|fail\|crit" | tail -10 | _colorize_log
+            local _recent
+            _recent=$(grep -ai "$1" "$LOG_FILE" | grep -av '\[sudo\]' | grep -ai "error\|warn\|fail\|crit" | tail -10)
+            if [[ -n "$_recent" ]]; then
+                echo "$_recent" | _colorize_log
+            else
+                echo "  (no recent errors or warnings)"
+            fi
         fi
     else
         if [[ $USER_MODE -eq 1 ]]; then
@@ -897,7 +902,6 @@ cmd_list() {
             fi
         done
     done
-    # Option 3: one-liner noop
     [[ $_any_dir -eq 0 ]] && { _warn "service directory $SVDIR does not exist"; exit 0; } || true
 
 }
@@ -954,6 +958,13 @@ usage() {
 # --- Dispatch -----------------------------------------------------------------
 
 CMD="$1"  # used by _check_service_exists for cross-mode hints
+
+[[ $NOW -eq 1 && "$1" != "enable" ]] && _warn "--now has no effect for '$1', ignoring"
+[[ $WITH_LOG -eq 1 && "$1" != "new" ]] && _warn "--log has no effect for '$1', ignoring"
+[[ $LIST_UPTIME -eq 1 && "$1" != "list" ]] && _warn "--uptime has no effect for '$1', ignoring"
+[[ -n "$LOG_LEVEL" && "$1" != "logs" ]] && _warn "--errors/--level has no effect for '$1', ignoring"
+[[ "$LOG_LINES" != "10" && "$1" != "logs" ]] && _warn "--lines has no effect for '$1', ignoring"
+[[ "$WATCH_INTERVAL" != "2" && "$1" != "watch" ]] && _warn "--interval has no effect for '$1', ignoring"
 
 if _needs_root "$1"; then
     _check_root "$1"
