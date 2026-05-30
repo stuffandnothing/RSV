@@ -1,10 +1,11 @@
 # Maintainer: Cyridge cyridge@proton.me
 pkgname=rsv-ng
-pkgver=r1.1
+pkgver=r38.502494c
 pkgrel=1
 pkgdesc="A runit service manager with smart completions, scaffolding, and more"
 arch=('any')
 url="https://gitlab.com/runit-rsv/rsv-main"
+keywords=('runit' 'service' 'manager' 'init' 'artix' 'void' 'devuan' 'sv')
 license=('GPL2')
 depends=('runit')
 makedepends=('git')
