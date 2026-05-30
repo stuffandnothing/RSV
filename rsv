@@ -444,6 +444,17 @@ _fmt_uptime() {
     else _out="${r}s"
     fi
 }
+# Run a single-service command function against one or more services.
+# Each call runs in a subshell so _error/exit in one service doesn't abort the rest.
+_multi_svc() {
+    local _cmd="$1"; shift
+    local _failed=0
+    for _svc in "$@"; do
+        ( "$_cmd" "$_svc" ) || _failed=1
+    done
+    [[ $_failed -eq 1 ]] && exit 1
+}
+
 # --- Service commands ---------------------------------------------------------
 
 cmd_start() {
@@ -926,23 +937,23 @@ usage() {
     echo ""
     echo -e "${BOLD}commands:${NC}"
     echo "  init                start the user runsvdir supervisor (user mode only)"
-    echo "  start   <service>   start a service"
-    echo "  stop    <service>   stop a service"
-    echo "  restart <service>   restart a service"
-    echo "  reload  <service>   reload a service"
-    echo "  enable  <service>   enable a service"
-    echo "  disable <service>   disable a service"
-    echo "  status  [service]   show status of one or all enabled services"
+    echo "  start   <svc...>    start one or more services"
+    echo "  stop    <svc...>    stop one or more services"
+    echo "  restart <svc...>    restart one or more services"
+    echo "  reload  <svc...>    reload one or more services"
+    echo "  enable  <svc...>    enable one or more services"
+    echo "  disable <svc...>    disable one or more services"
+    echo "  status  [svc...]    show status of listed (or all enabled) services"
     echo "  list                list all available services and their state (-u to show uptime)"
     echo "  logs    [service]   tail logs for a service (or global log)"
-    echo "  edit    <service>   open the service run script in \$EDITOR"
+    echo "  edit    <svc...>    open the run script(s) in \$EDITOR"
     echo "  new     <service>   scaffold a new service (--log to include log service)"
     echo "  doctor              check for common runit configuration problems"
-    echo "  once    <service>   run a service once without supervision"
+    echo "  once    <svc...>    run one or more services once without supervision"
     echo "  watch   [service]   auto-refreshing status (--interval N, default 2s)"
-    echo "  log-setup  <service> add a svlogd log service to an existing service"
-    echo "  log-remove <service> remove the svlogd log service from a service"
-    echo "  finish-setup <service> scaffold a finish script for a service"
+    echo "  log-setup  <svc...>    add a svlogd log service to one or more services"
+    echo "  log-remove <svc...>    remove the svlogd log service from one or more services"
+    echo "  finish-setup <svc...>  scaffold a finish script for one or more services"
     echo ""
     echo -e "${BOLD} Assumed system paths (root):${NC}"
     echo "  sv dir:   $SVDIR"
@@ -971,24 +982,24 @@ if _needs_root "$1"; then
 fi
 
 case "$1" in
-    init)     [[ $USER_MODE -eq 0 ]] && _error "'init' is only available in user mode" || cmd_init ;;
-    start)    [[ -z "$2" ]] && usage || cmd_start "$2" ;;
-    stop)     [[ -z "$2" ]] && usage || cmd_stop "$2" ;;
-    restart)  [[ -z "$2" ]] && usage || cmd_restart "$2" ;;
-    reload)   [[ -z "$2" ]] && usage || cmd_reload "$2" ;;
-    enable)   [[ -z "$2" ]] && usage || cmd_enable "$2" ;;
-    disable)  [[ -z "$2" ]] && usage || cmd_disable "$2" ;;
-    status)   cmd_status "$2" ;;
-    list)     cmd_list ;;
-    logs)     cmd_logs "$2" ;;
-    edit)         [[ -z "$2" ]] && usage || cmd_edit "$2" ;;
+    init)         [[ $USER_MODE -eq 0 ]] && _error "'init' is only available in user mode" || cmd_init ;;
+    start)        [[ -z "$2" ]] && usage || _multi_svc cmd_start "${@:2}" ;;
+    stop)         [[ -z "$2" ]] && usage || _multi_svc cmd_stop "${@:2}" ;;
+    restart)      [[ -z "$2" ]] && usage || _multi_svc cmd_restart "${@:2}" ;;
+    reload)       [[ -z "$2" ]] && usage || _multi_svc cmd_reload "${@:2}" ;;
+    enable)       [[ -z "$2" ]] && usage || _multi_svc cmd_enable "${@:2}" ;;
+    disable)      [[ -z "$2" ]] && usage || _multi_svc cmd_disable "${@:2}" ;;
+    status)       if [[ -n "$2" ]]; then _multi_svc cmd_status "${@:2}"; else cmd_status; fi ;;
+    list)         cmd_list ;;
+    logs)         cmd_logs "$2" ;;
+    edit)         [[ -z "$2" ]] && usage || _multi_svc cmd_edit "${@:2}" ;;
     new)          [[ -z "$2" ]] && usage || cmd_new "$2" ;;
     doctor)       cmd_doctor ;;
-    once)         [[ -z "$2" ]] && usage || cmd_once "$2" ;;
+    once)         [[ -z "$2" ]] && usage || _multi_svc cmd_once "${@:2}" ;;
     watch)        cmd_watch "$2" ;;
-    log-setup)    [[ -z "$2" ]] && usage || cmd_log_setup "$2" ;;
-    log-remove)   [[ -z "$2" ]] && usage || cmd_log_remove "$2" ;;
-    finish-setup) [[ -z "$2" ]] && usage || cmd_finish_setup "$2" ;;
+    log-setup)    [[ -z "$2" ]] && usage || _multi_svc cmd_log_setup "${@:2}" ;;
+    log-remove)   [[ -z "$2" ]] && usage || _multi_svc cmd_log_remove "${@:2}" ;;
+    finish-setup) [[ -z "$2" ]] && usage || _multi_svc cmd_finish_setup "${@:2}" ;;
     *)            usage ;;
 esac
 
