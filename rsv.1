@@ -1,0 +1,356 @@
+.TH RSV 1 "2026" "rsv-ng" "User Commands"
+.SH NAME
+rsv \- runit service manager
+.SH SYNOPSIS
+.B rsv
+[\fIOPTIONS\fR]
+.I command
+[\fIservice\fR...]
+.SH DESCRIPTION
+.B rsv
+is a front-end for the
+.BR sv (8)
+and
+.BR runsvdir (8)
+utilities that makes managing runit services more convenient.
+It handles both system-wide services (when run as root) and
+per-user services (when run as a non-root user or with
+.BR \-\-user ).
+.PP
+Most service commands accept one or more service names.
+When multiple names are given, each is processed in turn;
+a failure for one service is reported but does not prevent
+the remaining services from being processed.
+.SH OPTIONS
+.TP
+.B \-\-user
+Operate on user services instead of system services.
+Automatically set when the invoking user is not root.
+.TP
+\fB\-\-as\-user\fR \fIuser\fR
+Manage another user's runit services.
+Requires read/write access to that user's runit directories
+(typically run as root).
+.TP
+.B \-\-now
+Used with
+.BR enable :
+also start the service immediately after enabling it.
+.TP
+.B \-\-log
+Used with
+.BR new :
+scaffold a
+.BR svlogd (8)
+log service alongside the main service.
+.TP
+.B \-\-errors
+Used with
+.BR logs :
+show only lines matching \fIerror\fR, \fIwarn\fR, \fIcrit\fR, or \fIfail\fR.
+.TP
+\fB\-\-level\fR \fIlevels\fR
+Used with
+.BR logs :
+filter log output to lines matching the given comma-separated
+level keywords (e.g.\& \fI\-\-level error,warn\fR).
+.TP
+\fB\-\-lines\fR \fIN\fR
+Used with
+.BR logs :
+show the last \fIN\fR matching lines before following new output
+(default: 10).
+.TP
+.BR \-u ", " \-\-uptime
+Used with
+.BR list :
+show the uptime of each running service.
+.TP
+\fB\-\-interval\fR \fIN\fR
+Used with
+.BR watch :
+refresh every \fIN\fR seconds (default: 2).
+.TP
+.B \-\-debug
+Re-execute the command under
+.BR bash (1)
+.B \-x
+tracing, then print a summary of functions called and key
+path variables.
+Useful for diagnosing unexpected behaviour.
+.SH COMMANDS
+.SS Supervisor management
+.TP
+.B init
+Start the user-mode
+.BR runsvdir (8)
+supervisor in the background.
+Only valid in user mode.
+Add \fBrsv \-\-user init\fR to your session startup file
+(\fI~/.profile\fR, \fI~/.xinitrc\fR, etc.) to start it automatically.
+.SS Service lifecycle
+.TP
+\fBstart\fR \fIservice\fR...
+Start one or more services.
+Each service must already be enabled.
+.TP
+\fBstop\fR \fIservice\fR...
+Stop one or more running services.
+.TP
+\fBrestart\fR \fIservice\fR...
+Restart one or more services.
+Waits for each service to get a new PID before reporting success.
+.TP
+\fBreload\fR \fIservice\fR...
+Send the reload signal (SIGHUP) to one or more services.
+Not all services support reloading; an error is printed for those that do not.
+.TP
+\fBonce\fR \fIservice\fR...
+Run one or more services once without supervision
+(they will not be restarted if they exit).
+.SS Enabling and disabling
+.TP
+\fBenable\fR [\fB\-\-now\fR] \fIservice\fR...
+Create a symlink in
+.I RUNSVDIR
+so that
+.BR runsvdir (8)
+begins supervising the service.
+With
+.BR \-\-now ,
+also start the service immediately.
+.TP
+\fBdisable\fR \fIservice\fR...
+Stop and remove the supervision symlink for one or more services.
+.SS Status and listing
+.TP
+\fBstatus\fR [\fIservice\fR...]
+Without arguments, show the state of every enabled service.
+With one or more service names, show detailed status for each,
+including recent warnings and errors from the global log.
+.TP
+\fBlist\fR [\fB\-u\fR]
+List all known services across all service directories, indicating
+whether each is enabled/running, enabled/down, or disabled.
+With
+.BR \-u " / " \-\-uptime ,
+also show the uptime of running services.
+.TP
+\fBwatch\fR [\fIservice\fR] [\fB\-\-interval\fR \fIN\fR]
+Display an auto-refreshing status view, similar to
+.BR watch (1).
+Without a service name, shows all enabled services.
+.SS Logs
+.TP
+\fBlogs\fR [\fIservice\fR] [\fB\-\-errors\fR] [\fB\-\-level\fR \fIlevels\fR] [\fB\-\-lines\fR \fIN\fR]
+Follow log output.
+.RS
+.IP \(bu 2
+With a service name: use the service's own
+.BR svlogd (8)
+log if one is configured, otherwise grep the global log.
+.IP \(bu 2
+Without a service name: follow the global log file.
+.RE
+.SS Service creation and editing
+.TP
+\fBnew\fR [\fB\-\-log\fR] \fIservice\fR
+Scaffold a new service directory under
+.IR SVDIR ,
+creating a stub
+.I run
+script.
+With
+.BR \-\-log ,
+also creates a
+.BR svlogd (8)
+log service.
+Opens the run script for editing if confirmed.
+.TP
+\fBedit\fR \fIservice\fR...
+Open the
+.I run
+script for one or more services in
+.BR $EDITOR .
+.SS Log service management
+.TP
+\fBlog\-setup\fR \fIservice\fR...
+Add a
+.BR svlogd (8)
+log service to one or more existing services.
+If the service is currently enabled, supervision is restarted
+so that
+.BR runsv (8)
+picks up the new log directory.
+.TP
+\fBlog\-remove\fR \fIservice\fR...
+Remove the
+.BR svlogd (8)
+log service from one or more services.
+Log data on disk is left in place.
+.SS Finish script
+.TP
+\fBfinish\-setup\fR \fIservice\fR...
+Scaffold a
+.I finish
+script for one or more services.
+The finish script is called by
+.BR runsv (8)
+whenever the service exits, and can be used to log the exit
+code or suppress automatic restarts.
+.SS Diagnostics
+.TP
+.B doctor
+Check for common runit configuration problems: dangling symlinks
+in
+.IR RUNSVDIR ,
+missing or non-executable run scripts, services stuck in the
+down state, and log services that are not being supervised.
+.SH ENVIRONMENT
+.TP
+.B RUNIT_SVDIR
+Override the user-mode service definition directory
+(default: \fI~/.runit/sv\fR).
+.TP
+.B RUNIT_RUNSVDIR
+Override the user-mode active service directory
+(default: \fI~/.runit/runsvdir\fR).
+.TP
+.B RUNIT_LOG
+Override the path to the global log file used in user mode
+(default: \fI~/.runit/log/everything/current\fR).
+.TP
+.B EDITOR ", " VISUAL
+Editor opened by
+.B edit
+and
+.BR new .
+When running under
+.BR sudo (8),
+.B rsv
+attempts to recover the real user's editor from their login
+shell if these variables are stripped.
+.TP
+.B NO_COLOR
+Disable all colour output (see \fIhttps://no-color.org\fR).
+Colour is also disabled automatically when stdout is not a
+terminal or
+.B TERM
+is set to
+.IR dumb .
+.TP
+.B _RSV_DEBUG
+Internal: enables
+.B set \-x
+tracing when the script re-invokes itself under
+.BR \-\-debug .
+Do not set this directly; use
+.B \-\-debug
+instead.
+.SH FILES
+.SS System paths (Void Linux)
+.TP
+.I /etc/sv
+Service definition directory.
+.TP
+.I /var/service
+Active service directory (RUNSVDIR).
+.TP
+.I /var/log/sv/everything/current
+Global log file.
+.SS System paths (Artix Linux)
+.TP
+.I /etc/runit/sv
+Service definition directory.
+.TP
+.I /etc/runit/runsvdir/default
+Active service directory (RUNSVDIR).
+.TP
+.I /var/log/everything/current
+Global log file.
+.SS System paths (Devuan)
+.TP
+.I /etc/sv ", " /usr/share/runit/sv.current
+Service definition directories.
+.TP
+.I /etc/runit/runsvdir/default
+Active service directory (RUNSVDIR).
+.TP
+.I /var/log/runit/everything/current
+Global log file.
+.SS User paths (all distros)
+.TP
+.I ~/.runit/sv
+User service definition directory (override: \fB$RUNIT_SVDIR\fR).
+.TP
+.I ~/.runit/runsvdir
+User active service directory (override: \fB$RUNIT_RUNSVDIR\fR).
+.TP
+.I ~/.runit/log/everything/current
+User global log (override: \fB$RUNIT_LOG\fR).
+.SH EXAMPLES
+Start the user runsvdir supervisor at login:
+.PP
+.RS
+.EX
+rsv \-\-user init
+.EE
+.RE
+.PP
+Enable and immediately start a system service:
+.PP
+.RS
+.EX
+rsv enable \-\-now nginx
+.EE
+.RE
+.PP
+Enable and start several services at once:
+.PP
+.RS
+.EX
+rsv enable \-\-now nginx redis postgresql
+.EE
+.RE
+.PP
+Watch error-level log lines for a service:
+.PP
+.RS
+.EX
+rsv logs \-\-errors nginx
+.EE
+.RE
+.PP
+Create a new user service with a log service:
+.PP
+.RS
+.EX
+rsv \-\-user new \-\-log myapp
+.EE
+.RE
+.PP
+Check for configuration problems:
+.PP
+.RS
+.EX
+rsv doctor
+.EE
+.RE
+.PP
+Manage services belonging to another user (as root):
+.PP
+.RS
+.EX
+rsv \-\-as\-user alice status
+.EE
+.RE
+.SH SEE ALSO
+.BR sv (8),
+.BR runsvdir (8),
+.BR runsv (8),
+.BR svlogd (8),
+.BR runit (8)
+.SH AUTHOR
+Cyridge <cyridge@proton.me>
+.SH LICENSE
+GNU General Public License, version 2 or later.
