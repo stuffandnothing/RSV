@@ -882,12 +882,19 @@ cmd_status() {
         else
             _info "Enabled services:"
         fi
+        local -A _st=()
+        local _line _path _svcname
+        while IFS= read -r _line; do
+            _path="${_line#*: }"; _path="${_path%%:*}"; _path="${_path%/}"
+            _svcname="${_path##*/}"
+            [[ -n "$_svcname" ]] && _st["$_svcname"]="$_line"
+        done < <(sv status "$RUNSVDIR"/*/ 2>/dev/null)
+
         for svc in "$RUNSVDIR"/*/; do
             [[ -d "$svc" ]] || continue
             svc="${svc%/}"; svc="${svc##*/}"
             _is_internal "$svc" && continue
-            local out uptime_str
-            out=$(_sv status "$svc" 2>/dev/null)
+            local out="${_st[$svc]:-}" uptime_str
             if [[ "$out" == *"run:"* ]]; then
                 local uptime; _parse_uptime "$out" uptime
                 _fmt_uptime "$uptime" uptime_str
