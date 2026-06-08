@@ -26,6 +26,7 @@ _rsv() {
         'log-setup:add a log service to one or more services'
         'log-remove:remove the log service from one or more services'
         'finish-setup:scaffold a finish script for one or more services'
+        'help:show usage information'
     )
 
     # Distro-aware system paths

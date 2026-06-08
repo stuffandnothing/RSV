@@ -50,7 +50,7 @@ end
 # Helper: no rsv subcommand seen yet
 function __rsv_no_cmd
     set -l tokens (commandline -opc)
-    for cmd in start stop restart reload enable disable status list logs edit new init once watch doctor log-setup log-remove finish-setup
+    for cmd in start stop restart reload enable disable status list logs edit new init once watch doctor log-setup log-remove finish-setup help
         if contains -- $cmd $tokens
             return 1
         end
@@ -182,6 +182,7 @@ complete -c rsv -f -n __rsv_no_cmd -a "doctor"       -d "check for common runit 
 complete -c rsv -f -n __rsv_no_cmd -a "log-setup"    -d "add a log service to an existing service"
 complete -c rsv -f -n __rsv_no_cmd -a "log-remove"   -d "remove the log service from a service"
 complete -c rsv -f -n __rsv_no_cmd -a "finish-setup" -d "scaffold a finish script for a service"
+complete -c rsv -f -n __rsv_no_cmd -a "help"         -d "show usage information"
 
 # --- Service name completions ---
 

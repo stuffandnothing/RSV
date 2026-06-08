@@ -5,7 +5,7 @@ _rsv() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="start stop restart reload enable disable status list logs edit new init once watch doctor log-setup log-remove finish-setup"
+    local commands="start stop restart reload enable disable status list logs edit new init once watch doctor log-setup log-remove finish-setup help"
 
     # Distro-aware system paths
     local svdir runsvdir
