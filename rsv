@@ -78,10 +78,14 @@ if [[ -f /etc/os-release ]]; then
 fi
 
 case "$_DISTRO" in
-    void)    _SYS_SVDIRS=("/etc/sv") ;;
-    devuan)  _SYS_SVDIRS=("/etc/sv" "/usr/share/runit/sv.current") ;;
-    artix)   _SYS_SVDIRS=("/etc/runit/sv") ;;
-    *)       _SYS_SVDIRS=("/etc/sv") ;;
+    void)    _SYS_SVDIRS=("/etc/sv")
+             _SYS_RUNSVDIR="/var/service" ;;
+    devuan)  _SYS_SVDIRS=("/etc/sv" "/usr/share/runit/sv.current")
+             _SYS_RUNSVDIR="/etc/runit/runsvdir/default" ;;
+    artix)   _SYS_SVDIRS=("/etc/runit/sv")
+             _SYS_RUNSVDIR="/etc/runit/runsvdir/default" ;;
+    *)       _SYS_SVDIRS=("/etc/sv")
+             _SYS_RUNSVDIR="/var/service" ;;
 esac
 
 if [[ $USER_MODE -eq 0 ]]; then
@@ -108,6 +112,7 @@ if [[ $USER_MODE -eq 0 ]]; then
             SVDIR="/etc/sv"
             _SVDIRS=("/etc/sv")
             RUNSVDIR="/var/service"
+            
             LOG_FILE="/var/log/everything/current"
             ;;
     esac
@@ -117,7 +122,6 @@ else
     RUNSVDIR="${RUNIT_RUNSVDIR:-$HOME/.runit/runsvdir}"
     LOG_FILE="${RUNIT_LOG:-$HOME/.runit/log/everything/current}"
 fi
-
 
 
 _ORIG_ARGS=("$@")
@@ -920,6 +924,7 @@ cmd_list() {
 # --- Usage --------------------------------------------------------------------
 
 usage() {
+
     echo -e "${BOLD}rsv${NC} - runit service manager"
     echo ""
     echo -e "${BOLD}usage:${NC} rsv [--user] <command> [service]"
@@ -946,7 +951,7 @@ usage() {
     echo "  status  [svc...]    show status of listed (or all enabled) services"
     echo "  list                list all available services and their state (-u to show uptime)"
     echo "  logs    [service]   tail logs for a service (or global log)"
-    echo "  edit    <svc...>    open the run script(s) in \$EDITOR"
+    echo "  edit    <svc...>    open the run script(s) in \$EDITOR ($EDITOR)"
     echo "  new     <service>   scaffold a new service (--log to include log service)"
     echo "  doctor              check for common runit configuration problems"
     echo "  once    <svc...>    run one or more services once without supervision"
@@ -956,14 +961,22 @@ usage() {
     echo "  finish-setup <svc...>  scaffold a finish script for one or more services"
     echo ""
     echo -e "${BOLD} Assumed system paths (root):${NC}"
-    echo "  sv dir:   $SVDIR"
-    echo "  run dir:  $RUNSVDIR"
+    echo "  sv dir:   $_SYS_SVDIRS"
+    echo "  run dir:  $_SYS_RUNSVDIR"
     echo ""
     echo -e "${BOLD}user paths:${NC}"
     echo "  sv dir:   ~/.runit/sv          (override: \$RUNIT_SVDIR)"
     echo "  run dir:  ~/.runit/runsvdir    (override: \$RUNIT_RUNSVDIR)"
     echo ""
     echo -e "${BOLD}commands requiring root (system mode):${NC} start stop restart reload enable disable"
+}
+
+easter_egg(){
+    printf '%s\n' "IF9fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fXwo8IHJzdiBpcyBmYXN0IGFuZCBk" \
+    "aXN0cm8gaW5kZXBlbnRlbnQgPgogLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0t" \
+    "CiAgICAgICAgXCAgIF5fX14KICAgICAgICAgXCAgKG9vKVxfX19fX19fCiAgICAgICAgICAgIChf" \
+    "XylcICAgICAgIClcL1wKICAgICAgICAgICAgICAgIHx8LS0tLXcgfAogICAgICAgICAgICAgICAg" \
+    "fHwgICAgIHx8Cg==" | base64 -d
 }
 
 # --- Dispatch -----------------------------------------------------------------
@@ -1000,6 +1013,7 @@ case "$1" in
     log-setup)    [[ -z "$2" ]] && usage || _multi_svc cmd_log_setup "${@:2}" ;;
     log-remove)   [[ -z "$2" ]] && usage || _multi_svc cmd_log_remove "${@:2}" ;;
     finish-setup) [[ -z "$2" ]] && usage || _multi_svc cmd_finish_setup "${@:2}" ;;
-    *)            usage ;;
+    help|--help|usage) usage ;;
+    *)            usage && easter_egg;;
 esac
 

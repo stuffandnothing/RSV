@@ -75,7 +75,7 @@ _rsv() {
 
     # Complete --level argument
     if [[ "$prev" == "--level" ]]; then
-        COMPREPLY=($(compgen -W "error warn info crit fail" -- "$cur"))
+        COMPREPLY=($(compgen -W "error warn info debug crit fail emerg alert" -- "$cur"))
         return
     fi
 
@@ -99,7 +99,10 @@ _rsv() {
                 COMPREPLY=($(compgen -W "$(_rsv_disabled)" -- "$cur"))
             fi
             ;;
-        start|stop|restart|reload|disable|status)
+        start|once)
+            COMPREPLY=($(compgen -W "$(_rsv_all)" -- "$cur"))
+            ;;
+        stop|restart|reload|disable|status)
             COMPREPLY=($(compgen -W "$(_rsv_enabled)" -- "$cur"))
             ;;
         logs)
@@ -108,9 +111,6 @@ _rsv() {
             else
                 COMPREPLY=($(compgen -W "$(_rsv_enabled)" -- "$cur"))
             fi
-            ;;
-        once)
-            COMPREPLY=($(compgen -W "$(_rsv_enabled)" -- "$cur"))
             ;;
         watch)
             if [[ "$cur" == --* ]]; then

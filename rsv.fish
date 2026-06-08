@@ -160,13 +160,13 @@ complete -c rsv -f -n "test (commandline -opc)[-1] = --as-user" \
     -a "(getent passwd | cut -d: -f1)"
 
 # --- Subcommands ---
-complete -c rsv -f -n __rsv_no_cmd -a "start"        -d "start a service"
-complete -c rsv -f -n __rsv_no_cmd -a "stop"         -d "stop a service"
-complete -c rsv -f -n __rsv_no_cmd -a "restart"      -d "restart a service"
-complete -c rsv -f -n __rsv_no_cmd -a "reload"       -d "reload a service"
-complete -c rsv -f -n __rsv_no_cmd -a "enable"       -d "enable a service"
-complete -c rsv -f -n __rsv_no_cmd -a "disable"      -d "disable a service"
-complete -c rsv -f -n __rsv_no_cmd -a "status"       -d "show service status"
+complete -c rsv -f -n __rsv_no_cmd -a "start"        -d "start one or more services"
+complete -c rsv -f -n __rsv_no_cmd -a "stop"         -d "stop one or more services"
+complete -c rsv -f -n __rsv_no_cmd -a "restart"      -d "restart one or more services"
+complete -c rsv -f -n __rsv_no_cmd -a "reload"       -d "reload one or more services"
+complete -c rsv -f -n __rsv_no_cmd -a "enable"       -d "enable one or more services"
+complete -c rsv -f -n __rsv_no_cmd -a "disable"      -d "disable one or more services"
+complete -c rsv -f -n __rsv_no_cmd -a "status"       -d "show status of one or all services"
 complete -c rsv -f -n __rsv_no_cmd -a "list"         -d "list all services"
 complete -c rsv -f -n "__rsv_cmd_is list; and not contains -- --uptime (commandline -opc); and not contains -- -u (commandline -opc)" \
     -a "--uptime" -d "show uptime for running services"
@@ -176,7 +176,7 @@ complete -c rsv -f -n __rsv_no_cmd -a "logs"         -d "tail service logs"
 complete -c rsv -f -n __rsv_no_cmd -a "edit"         -d "open run script in \$EDITOR"
 complete -c rsv -f -n __rsv_no_cmd -a "new"          -d "scaffold a new service"
 complete -c rsv -f -n __rsv_no_cmd -a "init"         -d "start user runsvdir (user mode only)"
-complete -c rsv -f -n __rsv_no_cmd -a "once"         -d "run a service once without supervision"
+complete -c rsv -f -n __rsv_no_cmd -a "once"         -d "run one or more services once without supervision"
 complete -c rsv -f -n __rsv_no_cmd -a "watch"        -d "auto-refreshing status"
 complete -c rsv -f -n __rsv_no_cmd -a "doctor"       -d "check for common runit problems"
 complete -c rsv -f -n __rsv_no_cmd -a "log-setup"    -d "add a log service to an existing service"
@@ -185,7 +185,7 @@ complete -c rsv -f -n __rsv_no_cmd -a "finish-setup" -d "scaffold a finish scrip
 
 # --- Service name completions ---
 
-complete -c rsv -f -n "__rsv_cmd_is start"   -a "(__rsv_enabled_services)"
+complete -c rsv -f -n "__rsv_cmd_is start"   -a "(__rsv_all_services)"
 complete -c rsv -f -n "__rsv_cmd_is stop"    -a "(__rsv_enabled_services)"
 complete -c rsv -f -n "__rsv_cmd_is restart" -a "(__rsv_enabled_services)"
 complete -c rsv -f -n "__rsv_cmd_is reload"  -a "(__rsv_enabled_services)"
@@ -204,7 +204,7 @@ complete -c rsv -f -n "__rsv_cmd_is new; and not contains -- --log (commandline 
 complete -c rsv -f -n "__rsv_cmd_is new; and not contains -- --user (commandline -opc)" \
     -a "--user" -d "create in user service directory"
 
-complete -c rsv -f -n "__rsv_cmd_is once"  -a "(__rsv_enabled_services)"
+complete -c rsv -f -n "__rsv_cmd_is once"  -a "(__rsv_all_services)"
 complete -c rsv -f -n "__rsv_cmd_is watch" -a "(__rsv_enabled_services)"
 complete -c rsv -f -n "__rsv_cmd_is watch; and not contains -- --interval (commandline -opc)" \
     -a "--interval" -d "refresh every N seconds (default 2)"
@@ -217,5 +217,7 @@ complete -c rsv -f -n "__rsv_cmd_is logs; and not contains -- --errors (commandl
     -a "--errors" -d "show only error/warn/crit/fail lines"
 complete -c rsv -f -n "__rsv_cmd_is logs; and not contains -- --level (commandline -opc)" \
     -a "--level"  -d "filter by level e.g. error,warn"
+complete -c rsv -f -n "__rsv_cmd_is logs; and test (commandline -opc)[-1] = --level" \
+    -a "error warn info debug crit fail emerg alert" -d "log level"
 complete -c rsv -f -n "__rsv_cmd_is logs; and not contains -- --lines (commandline -opc)" \
     -a "--lines"  -d "show last N matching lines (default 10)"

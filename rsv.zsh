@@ -8,24 +8,24 @@ _rsv() {
 
     local -a commands
     commands=(
-        'start:start a service'
-        'stop:stop a service'
-        'restart:restart a service'
-        'reload:reload a service'
-        'enable:enable a service'
-        'disable:disable a service'
-        'status:show service status'
+        'start:start one or more services'
+        'stop:stop one or more services'
+        'restart:restart one or more services'
+        'reload:reload one or more services'
+        'enable:enable one or more services'
+        'disable:disable one or more services'
+        'status:show status of one or all services'
         'list:list all services'
         'logs:tail service logs'
-        'edit:open run script in $EDITOR'
+        'edit:open run script(s) in $EDITOR'
         'new:scaffold a new service'
         'init:start user runsvdir (user mode only)'
-        'once:run a service once without supervision'
+        'once:run one or more services once without supervision'
         'watch:auto-refreshing status'
         'doctor:check for common runit problems'
-        'log-setup:add a log service to an existing service'
-        'log-remove:remove the log service from a service'
-        'finish-setup:scaffold a finish script for a service'
+        'log-setup:add a log service to one or more services'
+        'log-remove:remove the log service from one or more services'
+        'finish-setup:scaffold a finish script for one or more services'
     )
 
     # Distro-aware system paths
@@ -150,8 +150,19 @@ _rsv() {
                         '*: :->svcs'
                     [[ $state == svcs ]] && _rsv_disabled
                     ;;
-                start|stop|restart|reload|disable|status|once|logs)
+                start|once)
+                    _rsv_all
+                    ;;
+                stop|restart|reload|disable|status)
                     _rsv_enabled
+                    ;;
+                logs)
+                    _arguments \
+                        '--errors[show only error/warn/crit/fail lines]' \
+                        '--level[filter by log level]:level:(error warn info debug crit fail emerg alert)' \
+                        '--lines[show last N matching lines]:N:' \
+                        '*: :->svcs'
+                    [[ $state == svcs ]] && _rsv_enabled
                     ;;
                 watch)
                     _arguments \
