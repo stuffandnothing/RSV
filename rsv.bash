@@ -129,9 +129,6 @@ _rsv() {
             COMPREPLY=($(compgen -W "$(_rsv_no_finish)" -- "$cur"))
             ;;
         list)
-            if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--uptime -u" -- "$cur"))
-            fi
             ;;
         new)
             if [[ "$cur" == --* ]]; then

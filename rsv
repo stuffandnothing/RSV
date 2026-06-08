@@ -70,6 +70,14 @@ USER_MODE=0
 for _a in "$@"; do [[ "$_a" == "--user" ]] && USER_MODE=1 && break; done
 [[ $EUID -ne 0 ]] && USER_MODE=1
 
+_is_runit_running() {
+    local _comm
+    _comm="$(cat /proc/1/comm 2>/dev/null)"
+    [ "$_comm" = "runit" ] || [ "$_comm" = "runsvdir" ] || \
+    pgrep -x runit > /dev/null 2>&1 || pgrep -x runsvdir > /dev/null 2>&1
+}
+
+
 _DISTRO=""
 if [[ -f /etc/os-release ]]; then
     while IFS='=' read -r _key _val; do
@@ -112,7 +120,6 @@ if [[ $USER_MODE -eq 0 ]]; then
             SVDIR="/etc/sv"
             _SVDIRS=("/etc/sv")
             RUNSVDIR="/var/service"
-            
             LOG_FILE="/var/log/everything/current"
             ;;
     esac
@@ -123,6 +130,28 @@ else
     LOG_FILE="${RUNIT_LOG:-$HOME/.runit/log/everything/current}"
 fi
 
+_good_easter_egg(){
+    base64 -d <<< "IF9fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fXwo8IHJzdiBpcyBmYXN0IGFuZCBkaXN0cm8gaW5kZXBlbnRlbnQgPgogLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCiAgICAgICAgXCAgIF5fX14KICAgICAgICAgXCAgKG9vKVxfX19fX19fCiAgICAgICAgICAgIChfXylcICAgICAgIClcL1wKICAgICAgICAgICAgICAgIHx8LS0tLXcgfAogICAgICAgICAgICAgICAgfHwgICAgIHx8Cg=="
+}
+
+_bad_easter_egg(){ 
+    _pid1="$(cat /proc/1/comm 2>/dev/null)"
+    case "$_pid1" in
+        systemd)  base64 -d <<< "IF9fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fCjwgcnN2IGlzIGZvciBydW5pdCwgbm90IGZvciBzeXN0ZW1kID4KIC0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCiAgICAgICAgXCAgIF5fX14KICAgICAgICAgXCAgKG9vKVxfX19fX19fCiAgICAgICAgICAgIChfXylcICAgICAgIClcL1wKICAgICAgICAgICAgICAgIHx8LS0tLXcgfAogICAgICAgICAgICAgICAgfHwgICAgIHx8Cg==" ;;
+        dinit)    base64 -d <<< "IF9fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fXwo8IHJzdiBpcyBmb3IgcnVuaXQsIG5vdCBmb3IgZGluaXQgPgogLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCiAgICAgICAgXCAgIF5fX14KICAgICAgICAgXCAgKG9vKVxfX19fX19fCiAgICAgICAgICAgIChfXylcICAgICAgIClcL1wKICAgICAgICAgICAgICAgIHx8LS0tLXcgfAogICAgICAgICAgICAgICAgfHwgICAgIHx8Cg==" ;;
+        s6)       base64 -d <<< "IF9fX19fX19fX19fX19fX19fX19fX19fX19fX19fXwo8IHJzdiBpcyBmb3IgcnVuaXQsIG5vdCBmb3IgczYgPgogLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCiAgICAgICAgXCAgIF5fX14KICAgICAgICAgXCAgKG9vKVxfX19fX19fCiAgICAgICAgICAgIChfXylcICAgICAgIClcL1wKICAgICAgICAgICAgICAgIHx8LS0tLXcgfAogICAgICAgICAgICAgICAgfHwgICAgIHx8Cg==" ;;
+        66)       base64 -d <<< "IF9fX19fX19fX19fX19fX19fX19fX19fX19fX19fXwo8IHJzdiBpcyBmb3IgcnVuaXQsIG5vdCBmb3IgNjYgPgogLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCiAgICAgICAgXCAgIF5fX14KICAgICAgICAgXCAgKG9vKVxfX19fX19fCiAgICAgICAgICAgIChfXylcICAgICAgIClcL1wKICAgICAgICAgICAgICAgIHx8LS0tLXcgfAogICAgICAgICAgICAgICAgfHwgICAgIHx8Cg==" ;;
+        sysvinit) base64 -d <<< "IF9fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fXwo8IHJzdiBpcyBmb3IgcnVuaXQsIG5vdCBmb3Igc3lzdmluaXQgPgogLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCiAgICAgICAgXCAgIF5fX14KICAgICAgICAgXCAgKG9vKVxfX19fX19fCiAgICAgICAgICAgIChfXylcICAgICAgIClcL1wKICAgICAgICAgICAgICAgIHx8LS0tLXcgfAogICAgICAgICAgICAgICAgfHwgICAgIHx8Cg==" ;;
+        *)        _warn "runit is not running (PID 1 is: ${_pid1:-unknown})" ;;
+    esac
+}
+easter_egg() {
+    if _is_runit_running; then
+        _good_easter_egg
+    else
+        _bad_easter_egg
+    fi
+}
 
 _ORIG_ARGS=("$@")
 
@@ -950,7 +979,6 @@ cmd_list() {
                 local _once=0
                 [[ -f "$RUNSVDIR/.rsv-once.$svc" ]] && _once=1
                 if [[ "$out" == *"run:"* ]]; then
-                    if [[ $LIST_UPTIME -eq 1 ]]; then
                         local uptime uptime_str
                         _parse_uptime "$out" uptime
                         _fmt_uptime "$uptime" uptime_str
@@ -959,13 +987,6 @@ cmd_list() {
                         else
                             echo -e "  ${GREEN}[enabled/up]  ${NC} $svc ($uptime_str)"
                         fi
-                    else
-                        if [[ $_once -eq 1 ]]; then
-                            echo -e "  ${YELLOW}[once/up]     ${NC} $svc"
-                        else
-                            echo -e "  ${GREEN}[enabled/up]  ${NC} $svc"
-                        fi
-                    fi
                 else
                     if [[ $_once -eq 1 ]]; then
                         echo -e "  ${YELLOW}[once/down]   ${NC} $svc"
@@ -978,14 +999,15 @@ cmd_list() {
             fi
         done
     done
-    [[ $_any_dir -eq 0 ]] && { _warn "service directory $SVDIR does not exist"; exit 0; } || true
-
+    _any_warn=0
+    [[ $_any_dir -eq 0 ]] && { _warn "service directory $SVDIR does not exist"; _any_warn=1; }
+    _is_runit_running || { _warn "runit is not running"; _any_warn=1; }
+    [[ $_any_warn -eq 1 ]] &&  _bad_easter_egg && exit 1
 }
 
 # --- Usage --------------------------------------------------------------------
 
 usage() {
-
     echo -e "${BOLD}rsv${NC} - runit service manager"
     echo ""
     echo -e "${BOLD}usage:${NC} rsv [--user] <command> [service]"
@@ -1032,13 +1054,6 @@ usage() {
     echo -e "${BOLD}commands requiring root (system mode):${NC} start stop restart reload enable disable"
 }
 
-easter_egg(){
-    printf '%s\n' "IF9fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fXwo8IHJzdiBpcyBmYXN0IGFuZCBk" \
-    "aXN0cm8gaW5kZXBlbnRlbnQgPgogLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0t" \
-    "CiAgICAgICAgXCAgIF5fX14KICAgICAgICAgXCAgKG9vKVxfX19fX19fCiAgICAgICAgICAgIChf" \
-    "XylcICAgICAgIClcL1wKICAgICAgICAgICAgICAgIHx8LS0tLXcgfAogICAgICAgICAgICAgICAg" \
-    "fHwgICAgIHx8Cg==" | base64 -d
-}
 
 # --- Dispatch -----------------------------------------------------------------
 
