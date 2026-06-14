@@ -30,7 +30,8 @@ Before starting this project I wasn't aware of existing tools. Here's how they c
 |------|------|--------|
 | `rsv` (JojiiOfficial) | ~14ms | Raw unsorted `sv status` dump, no colors, includes internal dirs |
 | `rsm` | ~168ms | Formatted, but includes `current`/`supervise` as services |
-| `rsv` (this) | ~32ms | Sorted, colored, filters internals,uptime enabled/disabled/oc distinction |
+| `rsv` (this) | ~32ms | Sorted, colored, filters internals, enabled/disabled/uptime distinction |
+| `vsv-bash` | ~168ms |  estimated, same codebase as rsm | 
 | others | ? | Untested, don't use Void |
 
 If you use Void and want to benchmark I will add those.
