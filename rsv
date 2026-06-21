@@ -391,11 +391,6 @@ _suggest_service() {
 
     [[ ${#_svcs[@]} -eq 0 ]] && return
 
-    if command -v fzf >/dev/null 2>&1; then
-        printf '%s\n' "${_svcs[@]}" | fzf --filter="$input" 2>/dev/null | head -1
-        return
-    fi
-
     local len=${#input}
     for name in "${_svcs[@]}"; do
         for (( i=0; i<len; i++ )); do
