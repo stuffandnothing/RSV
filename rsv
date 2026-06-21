@@ -135,6 +135,9 @@ _good_easter_egg(){
 }
 
 _bad_easter_egg(){ 
+    if [ -x /sbin/openrc ] || [ -f /etc/init.d/openrc ] || [ -d /run/openrc ]; then
+			  base64 -d <<< "IF9fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX18KPCByc3YgaXMgZm9yIHJ1bml0LCBub3QgZm9yIG9wZW5yYyA+CiAtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCiAgICAgICAgXCAgIF5fX14KICAgICAgICAgXCAgKG9vKVxfX19fX19fCiAgICAgICAgICAgIChfXylcICAgICAgIClcL1wKICAgICAgICAgICAgICAgIHx8LS0tLXcgfAogICAgICAgICAgICAgICAgfHwgICAgIHx8Cg=="
+    fi
     _pid1="$(cat /proc/1/comm 2>/dev/null)"
     case "$_pid1" in
         systemd)  base64 -d <<< "IF9fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fCjwgcnN2IGlzIGZvciBydW5pdCwgbm90IGZvciBzeXN0ZW1kID4KIC0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCiAgICAgICAgXCAgIF5fX14KICAgICAgICAgXCAgKG9vKVxfX19fX19fCiAgICAgICAgICAgIChfXylcICAgICAgIClcL1wKICAgICAgICAgICAgICAgIHx8LS0tLXcgfAogICAgICAgICAgICAgICAgfHwgICAgIHx8Cg==" ;;
