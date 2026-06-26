@@ -64,7 +64,13 @@ _error_hint() {
     _hint "$hint"
     exit 1
 }
-# --- Mode selection -----------------------------------------------------------
+_soft_error_hint() {
+    local msg="${1:-an unknown error occurred}"
+    local hint="${2:-}"
+    echo -e "${RED}error${NC}: ${msg}"
+    _hint "$hint" 
+    exit 
+}
 
 USER_MODE=0
 for _a in "$@"; do [[ "$_a" == "--user" ]] && USER_MODE=1 && break; done
@@ -158,12 +164,10 @@ easter_egg() {
 
 _ORIG_ARGS=("$@")
 
-# Strip flag args and set variables
 NOW=0
 LOG_LEVEL=""
 LOG_LINES=10
 WATCH_INTERVAL=2
-LIST_UPTIME=0
 WITH_LOG=0
 AS_USER=""
 _args=()
@@ -205,8 +209,6 @@ for _a in "$@"; do
         _next_interval=1
     elif [[ "$_a" == --interval=* ]]; then
         WATCH_INTERVAL="${_a#--interval=}"
-    elif [[ "$_a" == "-u" || "$_a" == "--uptime" ]]; then
-        LIST_UPTIME=1
     elif [[ "$_a" == "--as-user" ]]; then
         _next_as_user=1
     elif [[ "$_a" == --as-user=* ]]; then
@@ -264,8 +266,6 @@ if [[ -n "$AS_USER" ]]; then
     unset _as_home _as_ok _chk _d
 fi
 
-# --- Helpers ------------------------------------------------------------------
-
 _reexec_as_root() {
     local escalator
     if command -v sudo >/dev/null 2>&1; then
@@ -287,7 +287,7 @@ _NEEDS_ROOT=(start stop restart enable disable reload edit new once log-setup lo
 
 _check_root() {
     if [[ $EUID -ne 0 ]]; then
-        _error "command '$1' requires root (or use --user for user services)"
+        _reexec_as_root || _error "command '$1' requires root (or use --user for user services)"
     fi
 }
 
@@ -372,7 +372,6 @@ _is_internal() {
 }
 
 # Find a close service name match.
-# Uses fzf --filter if available; falls back to single-char deletion / shared-prefix heuristic.
 _suggest_service() {
     local input="$1"
     local _dirs=("${_SVDIRS[@]:-$SVDIR}")
@@ -391,14 +390,15 @@ _suggest_service() {
 
     [[ ${#_svcs[@]} -eq 0 ]] && return
 
-    local len=${#input}
+    local len=${#input} input_l="${input,,}"
     for name in "${_svcs[@]}"; do
+        local name_l="${name,,}"
         for (( i=0; i<len; i++ )); do
-            [[ "${input:0:i}${input:i+1}" == "$name" ]] && { echo "$name"; return; }
+            [[ "${input_l:0:i}${input_l:i+1}" == "$name_l" ]] && { echo "$name"; return; }
         done
         local shared=0
-        while [[ $shared -lt ${#name} && $shared -lt $len \
-              && "${name:0:$((shared+1))}" == "${input:0:$((shared+1))}" ]]; do
+        while [[ $shared -lt ${#name_l} && $shared -lt $len \
+              && "${name_l:0:$((shared+1))}" == "${input_l:0:$((shared+1))}" ]]; do
             (( shared++ ))
         done
         [[ $shared -ge 4 && $shared -ge $(( len / 2 )) ]] && { echo "$name"; return; }
@@ -513,7 +513,7 @@ cmd_start() {
         _ok "started '$1'${pid:+ (pid $pid)} (not enabled — will not restart)"
         return
     fi
-    check_run "$1" && _error_hint "'$1' is already running" || :
+    check_run "$1" && _soft_error_hint "'$1' is already running" || :
     _sv start "$1" >/dev/null 2>&1 || _error "failed to start '$1'"
     _wait_for "sv status '$RUNSVDIR/$1' 2>&1 | grep -q '^run:'" 5 "$(_info Starting) '$1'"
     local pid; pid=$(cat "$RUNSVDIR/$1/supervise/pid" 2>/dev/null)
@@ -523,10 +523,11 @@ cmd_start() {
 cmd_stop() {
     _check_service_exists "$1"
     _check_service_enabled "$1"
-    check_run "$1" && : || _error_hint "'$1' is not running"
+    check_run "$1" && : || _soft_error_hint "'$1' is not running"
     local pid; pid=$(cat "$RUNSVDIR/$1/supervise/pid" 2>/dev/null)
     _sv stop "$1" >/dev/null 2>&1 || _error "failed to stop '$1'"
     _wait_for "sv status '$RUNSVDIR/$1' 2>&1 | grep -q '^down:'" 5 "$(_info Stopping) '$1'"
+    rm -f "$RUNSVDIR/.rsv-once.$1"
     _ok "stopped '$1'${pid:+ (pid $pid)}"
 }
 
@@ -627,7 +628,8 @@ LOGEOF
         _ok "created log service → $logdest"
     fi
 
-    read -rp "Edit run script now? [y/N] " _ans
+    printf "Edit run script now? [y/N] " >/dev/tty
+    read -r _ans </dev/tty
     [[ "${_ans,,}" == y ]] && "$(_editor)" "$SVDIR/$name/run"
     _info "enable when ready:    rsv enable $name"
 }
@@ -785,20 +787,25 @@ cmd_once() {
         [[ "${_ans,,}" != y ]] && exit 0
         mkdir -p "$RUNSVDIR"
         ln -s "$_SV_FOUND_DIR/$1" "$RUNSVDIR/$1"
+        touch "$RUNSVDIR/.rsv-once.$1"
         _wait_for "sv status '$RUNSVDIR/$1' 2>&1 | grep -qE '^(run|down):'" 5 "$(_info Starting) '$1'"
         _sv once "$1" >/dev/null || _error "failed to signal '$1'"
         _ok "running '$1' once (will not restart)"
         _hint "service remains enabled but down after exit — disable when done: rsv disable $1"
         return
     fi
-    _sv once "$1" >/dev/null && _ok "running '$1' once (will not restart)" || _error "failed to signal '$1'"
+    touch "$RUNSVDIR/.rsv-once.$1"
+    _sv once "$1" >/dev/null && _ok "running '$1' once (will not restart)" || { rm -f "$RUNSVDIR/.rsv-once.$1"; _error "failed to signal '$1'"; }
 }
 
 cmd_watch() {
     local svc="$1"
     local interval="$WATCH_INTERVAL"
+    tput smcup 2>/dev/null
+    trap 'tput rmcup 2>/dev/null; exit 0' INT TERM
     while true; do
-        clear
+        tput cup 0 0
+        tput ed 2>/dev/null || clear
         echo -e "${BOLD}rsv watch${NC} — every ${interval}s — $(date)"
         echo ""
         cmd_status "$svc"
@@ -833,7 +840,8 @@ exit 0
 FINEOF
     chmod +x "$finish"
     _ok "created finish script at $finish"
-    read -rp "Edit finish script now? [y/N] " _ans
+    printf "Edit finish script now? [y/N] " >/dev/tty
+    read -r _ans </dev/tty
     [[ "${_ans,,}" == y ]] && "$(_editor)" "$finish"
 }
 
@@ -860,12 +868,12 @@ cmd_logs() {
         fi
 
         if [[ -n "$log" ]]; then
-            tail -f "$log" | _lgrep_live | _colorize_log
+            tail -F "$log" | _lgrep_live | _colorize_log
         elif [[ -f "$LOG_FILE" ]]; then
             [[ ! -f "$log_run" ]] && _info "tip: run 'rsv log-setup $1' to enable per-service logging"
             tail -n "$((LOG_LINES * 100))" "$LOG_FILE" | grep -av '\[sudo\]' | grep -ai "$1" | _lgrep | tail -"$LOG_LINES" | _colorize_log
             _info "following new entries (Ctrl-C to stop)..."
-            tail -fn0 "$LOG_FILE" | grep --line-buffered -av '\[sudo\]' | grep --line-buffered -ai "$1" | _lgrep_live | _colorize_log
+            tail -Fn0 "$LOG_FILE" | grep --line-buffered -av '\[sudo\]' | grep --line-buffered -ai "$1" | _lgrep_live | _colorize_log
         else
             _error "no per-service log found and no global log at $LOG_FILE"
         fi
@@ -873,7 +881,7 @@ cmd_logs() {
         if [[ ! -f "$LOG_FILE" ]]; then
             _error "no global log at $LOG_FILE"
         fi
-        tail -f "$LOG_FILE" | _lgrep_live | _colorize_log
+        tail -F "$LOG_FILE" | _lgrep_live | _colorize_log
     fi
 }
 
@@ -1018,7 +1026,6 @@ usage() {
     echo "  --level <levels>    with logs: filter by level e.g. --level error,warn"
     echo "  --lines <N>         with logs: show last N matching lines (default 10)"
     echo "  --log               with new: also scaffold a log service"
-    echo "  -u, --uptime        with list: show uptime for running services"
     echo "  --interval <N>      with watch: refresh every N seconds (default 2)"
     echo ""
     echo -e "${BOLD}commands:${NC}"
@@ -1030,7 +1037,7 @@ usage() {
     echo "  enable  <svc...>    enable one or more services"
     echo "  disable <svc...>    disable one or more services"
     echo "  status  [svc...]    show status of listed (or all enabled) services"
-    echo "  list                list all available services and their state (-u to show uptime)"
+    echo "  list                list all available services and their state"
     echo "  logs    [service]   tail logs for a service (or global log)"
     echo "  edit    <svc...>    open the run script(s) in \$EDITOR ($EDITOR)"
     echo "  new     <service>   scaffold a new service (--log to include log service)"
@@ -1053,20 +1060,17 @@ usage() {
 }
 
 
-# --- Dispatch -----------------------------------------------------------------
+#Dispatch 
 
-CMD="$1"  # used by _check_service_exists for cross-mode hints
+CMD="$1" 
 
 [[ $NOW -eq 1 && "$1" != "enable" ]] && _warn "--now has no effect for '$1', ignoring"
 [[ $WITH_LOG -eq 1 && "$1" != "new" ]] && _warn "--log has no effect for '$1', ignoring"
-[[ $LIST_UPTIME -eq 1 && "$1" != "list" ]] && _warn "--uptime has no effect for '$1', ignoring"
 [[ -n "$LOG_LEVEL" && "$1" != "logs" ]] && _warn "--errors/--level has no effect for '$1', ignoring"
 [[ "$LOG_LINES" != "10" && "$1" != "logs" ]] && _warn "--lines has no effect for '$1', ignoring"
 [[ "$WATCH_INTERVAL" != "2" && "$1" != "watch" ]] && _warn "--interval has no effect for '$1', ignoring"
 
-if _needs_root "$1"; then
-    _check_root "$1"
-fi
+_needs_root "$1" && _check_root "$1" || true
 
 case "$1" in
     init)         [[ $USER_MODE -eq 0 ]] && _error "'init' is only available in user mode" || cmd_init ;;
