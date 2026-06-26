@@ -352,11 +352,14 @@ _check_service_exists() {
                 "did you mean: rsv --user $CMD $1"
         fi
     fi
-    local _suggestion
-    _suggestion=$(_suggest_service "$1")
-    if [[ -n "$_suggestion" ]]; then
+    local _suggestions=()
+    mapfile -t _suggestions < <(_suggest_service "$1")
+    if [[ ${#_suggestions[@]} -eq 1 ]]; then
         _error_hint "service '$1' not found" \
-            "did you mean: $_suggestion?"
+            "did you mean: ${_suggestions[0]}?"
+    elif [[ ${#_suggestions[@]} -gt 1 ]]; then
+        _error_hint "service '$1' not found" \
+            "did you mean one of: ${_suggestions[*]}?"
     fi
     _error_hint "service '$1' not found" \
         "run 'rsv list' to see available services"
@@ -390,19 +393,26 @@ _suggest_service() {
 
     [[ ${#_svcs[@]} -eq 0 ]] && return
 
-    local len=${#input} input_l="${input,,}"
+    local len=${#input} input_l="${input,,}" name name_l
+
     for name in "${_svcs[@]}"; do
-        local name_l="${name,,}"
+        name_l="${name,,}"
         for (( i=0; i<len; i++ )); do
             [[ "${input_l:0:i}${input_l:i+1}" == "$name_l" ]] && { echo "$name"; return; }
         done
-        local shared=0
+    done
+
+    local _matches=() shared
+    for name in "${_svcs[@]}"; do
+        name_l="${name,,}"
+        shared=0
         while [[ $shared -lt ${#name_l} && $shared -lt $len \
               && "${name_l:0:$((shared+1))}" == "${input_l:0:$((shared+1))}" ]]; do
             (( shared++ ))
         done
-        [[ $shared -ge 4 && $shared -ge $(( len / 2 )) ]] && { echo "$name"; return; }
+        [[ $shared -ge 4 && $shared -ge $(( len / 2 )) ]] && _matches+=("$name")
     done
+    printf '%s\n' "${_matches[@]}"
 }
 
 
