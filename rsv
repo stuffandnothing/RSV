@@ -1018,7 +1018,7 @@ cmd_list() {
     _any_warn=0
     [[ $_any_dir -eq 0 ]] && { _warn "service directory $SVDIR does not exist"; _any_warn=1; }
     _is_runit_running || { _warn "runit is not running"; _any_warn=1; }
-    [[ $_any_warn -eq 1 ]] &&  _bad_easter_egg && exit 1
+    if [[ $_any_warn -eq 1 ]]; then _bad_easter_egg; exit 1; fi
 }
 
 # --- Usage --------------------------------------------------------------------
