@@ -1,5 +1,4 @@
 # rsv bash completions
-# Source in ~/.bashrc or drop in /etc/bash_completion.d/rsv
 
 _rsv() {
     local cur prev words cword
