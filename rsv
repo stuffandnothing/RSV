@@ -445,7 +445,20 @@ _editor() {
     if [[ -z "$ed" && -n "$SUDO_USER" ]]; then
         ed=$(su - "$SUDO_USER" -c 'printenv EDITOR 2>/dev/null || printenv VISUAL 2>/dev/null' 2>/dev/null)
     fi
-    echo "${ed:-vi}"
+
+    if [[ -n "$ed" ]] && command -v "$ed" >/dev/null 2>&1; then
+        echo "$ed"
+        return 0
+    fi
+
+    for _fallback in vi vim nano; do
+        if command -v "$_fallback" >/dev/null 2>&1; then
+            echo "$_fallback"
+            return 0
+        fi
+    done
+
+    return 1
 }
 
 # --- User-mode supervisor management ------------------------------------------
@@ -599,7 +612,14 @@ cmd_edit() {
     local _svdir=$_SV_FOUND_DIR
     local script="$_svdir/$1/run"
     [[ ! -f "$script" ]] && _error "no run script at $script"
-    "$(_editor)" "$script"
+
+    local ed
+    if ! ed="$(_editor)"; then
+        _error_hint "no editor found" "set \$EDITOR or install vi/vim/nano"
+        return 1
+    fi
+
+    "$ed" "$script"
 }
 
 cmd_new() {

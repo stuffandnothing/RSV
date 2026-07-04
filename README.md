@@ -6,7 +6,7 @@ A friendly wrapper around runit's `sv` command, with system and user service sup
 <summary>Why?</summary>
 
 I don't hate myself and this is a nice wrapper. \
-The inspiration was OpenRC's `rc-service` and `rc-update`.
+The inspiration was OpenRC's `rc-service` and `rc-update`. \
 I hate doing `ln -s /etc/runit/sv/service_name /run/runit/service` — that gets annoying fast, and I don't have to think about it with this.
 
 </details>
@@ -21,7 +21,7 @@ Before starting this project I wasn't aware of existing tools. Here's how they c
 | [rsv](https://github.com/JojiiOfficial/rsv) | Rust | ~3 years ago | Abandoned, `list` is raw `sv status` dump |
 | [vsv](https://github.com/bahamas10/vsv) | Rust | ~3 years ago | Rewrite of bash-vsv, Void-focused, Abandoned |
 | [bash-vsv](https://github.com/bahamas10/bash-vsv) | Bash | ~3 years ago | Original vsv, Void-focused, Abandoned |
-| [rsm](https://gitea.artixlinux.org/linuxer/Runit-Service-Manager) | Bash | ~5 years ago | bash-vsv fork for Artix, shows internal runit dirs as services, Abandoned |
+| [rsm](https://gitea.artixlinux.org/linuxer/Runit-Service-Manager) | Bash | ~5 years ago | Attributed fork of bash-vsv for Artix, adds `logs`/`errorlogs`, shows internal runit dirs as services, Abandoned |
 | [roonit](https://github.com/19742bytes/roonit) | C | ~5 years ago | Void-focused, very basic, Abandoned |
 
 ### `list` benchmark (Artix, 47 services)
@@ -31,10 +31,12 @@ Before starting this project I wasn't aware of existing tools. Here's how they c
 | `rsv` (JojiiOfficial) | ~14ms | Raw unsorted `sv status` dump, no colors, includes internal dirs |
 | `rsm` | ~168ms | Formatted, but includes `current`/`supervise` as services |
 | `rsv` (this) | ~32ms | Sorted, colored, filters internals, enabled/disabled/uptime distinction |
-| `vsv-bash` | ~168ms |  estimated, same codebase as rsm | 
+| `bash-vsv` | ~168ms | Estimated, shares the same core codebase as `rsm` |
 | others | ? | Untested, don't use Void |
 
-If you use Void and want to benchmark I will add those.
+`rsm` is a properly attributed fork of `bash-vsv`, retargeted at Artix's paths with a couple of added subcommands (`logs`/`errorlogs`). The core service-listing/status logic is unchanged from `bash-vsv`, which is why the two benchmark identically.
+
+If you use Void and want to benchmark, I will add those.
 
 </details>
 
@@ -53,11 +55,13 @@ sudo ./Install.sh   # installs to /usr/local/bin, system completion dirs
 ### System-wide (as root)
 
 ```sh
-install -Dm755 rsv      /usr/local/bin/rsv
-install -Dm644 rsv.bash /usr/share/bash-completion/completions/rsv
-install -Dm644 rsv.fish /usr/share/fish/vendor_completions.d/rsv.fish
-install -Dm644 rsv.zsh  /usr/share/zsh/site-functions/_rsv
+ install -Dm755 rsv      /usr/local/bin/rsv
+ install -Dm644 rsv.bash /usr/share/bash-completion/completions/rsv
+ install -Dm644 rsv.fish /usr/share/fish/vendor_completions.d/rsv.fish
+ install -Dm644 rsv.zsh  /usr/share/zsh/site-functions/_rsv
+ install -Dm644 rsv.1    /usr/share/man/man1/rsv.1
 ```
+
 
 ### User-local
 
@@ -68,7 +72,7 @@ install -m644 rsv.fish ~/.config/fish/completions/rsv.fish
 install -m644 rsv.zsh  ~/.local/share/zsh/site-functions/_rsv
 ```
 
-> **Note:** For `sudo rsv` to work, system-wide installation is recommended.
+> **Note:** For sudo rsv and man pages to work, system-wide installation is recommended.
 
 </details>
 
@@ -84,24 +88,24 @@ System services require root. User services are selected automatically when not 
 
 | Command | Description |
 |---|---|
-| `start <service>` | start a service |
-| `stop <service>` | stop a service |
-| `restart <service>` | restart a service |
-| `reload <service>` | reload a service |
-| `enable <service>` | enable a service |
-| `disable <service>` | disable a service |
-| `status [service]` | status of one or all enabled services |
+| `start <service...>` | start one or more services |
+| `stop <service...>` | stop one or more services |
+| `restart <service...>` | restart one or more services |
+| `reload <service...>` | reload one or more services |
+| `enable <service...>` | enable one or more services |
+| `disable <service...>` | disable one or more services |
+| `status [service...]` | status of listed (or all enabled) services |
 | `list` | list all available services and their state |
 | `logs [service]` | tail logs for a service, or the global log |
-| `edit <service>` | open the service run script in `$EDITOR` |
+| `edit <service...>` | open the run script(s) in `$EDITOR` |
 | `new <service>` | scaffold a new service |
 | `init` | start the user runsvdir supervisor (user mode only) |
 | `doctor` | check for common runit configuration problems |
-| `once <service>` | run a service once without supervision |
+| `once <service...>` | run one or more services once without supervision |
 | `watch [service]` | auto-refreshing status display |
-| `log-setup <service>` | add a svlogd log service to an existing service |
-| `log-remove <service>` | remove the svlogd log service from a service |
-| `finish-setup <service>` | scaffold a finish script (runs on service exit) |
+| `log-setup <service...>` | add a svlogd log service to one or more services |
+| `log-remove <service...>` | remove the svlogd log service from one or more services |
+| `finish-setup <service...>` | scaffold a finish script for one or more services |
 
 ### Flags
 
@@ -148,11 +152,12 @@ sudo rsv --as-user bob enable pipewire
 sudo rsv --as-user bob logs pipewire
 ```
 
-If you run a command against the wrong mode, rsv will tell you:
+If you run a command against the wrong mode, rsv will reexec as root via sudo or doas
 
 ```
-error: service 'metalog' not found in /home/user/.runit/sv
-hint:  did you mean: sudo rsv status metalog
+$ rsv enable metalog
+[sudo] password for cytop:
+ok: enabled 'metalog'
 ```
 
 ## User services
@@ -162,6 +167,13 @@ User services live in `~/.runit/sv` with symlinks in `~/.runit/runsvdir`. Start 
 ```sh
 rsv --user init
 ```
+## Privilege handling
+
+rsv escalates privileges only through the user's existing `sudo` or `doas` configuration. When a command needs root and wasn't invoked with one already, rsv re-execs itself via whichever is installed (`sudo` preferred, `doas` as fallback) and returns an error if neither is available. It never bypasses or replaces the system's authentication policy.
+
+> **Note:** `doas` requires an explicit rule in `/etc/doas.conf` (e.g. `permit :wheel cmd /usr/bin/rsv`) for this to work — without one, `doas` will refuse silently rather than rsv being at fault.
+
+`--as-user <user>` is a separate mechanism and does **not** escalate privileges. It only checks that the invoking (already-privileged) user has read/write access to the target user's runit directories — or their nearest existing parent directory, if the target doesn't exist yet — and operates entirely within those existing filesystem permissions.
 
 Paths can be overridden with environment variables:
 
@@ -199,6 +211,26 @@ Paths can be overridden with environment variables:
 | enabled services | `/etc/runit/runsvdir/default` | `~/.runit/runsvdir` |
 | global log | `/var/log/runit/everything/current` | `~/.runit/log/everything/current` |
 | per-service log | `/var/log/<service>/current` | `~/.runit/log/<service>/current` |
+
+## Init detection
+
+rsv detects whether runit is actually running by checking if PID 1's process name is runit or runsvdir, falling back to a pgrep scan for either process — this correctly handles containers where runit runs as PID 2+ under an init shim like tini or docker-init. 
+
+```
+$ rsv list
+==> Available user services (in /home/cytop/.runit/sv):
+warn: service directory /home/cytop/.runit/sv does not exist
+warn: runit is not running
+ ___________________________________
+< rsv is for runit, not for systemd >
+ -----------------------------------
+        \   ^__^
+         \  (oo)\_______
+            (__)\       )\/\
+                ||----w |
+                ||     ||
+```
+> **Note:** Each taunt (systemd, OpenRC, dinit, s6, 66, and sysvinit) is pre-rendered and base64-embedded, so there's no runtime `cowsay` dependency. I got the idea due to `pacman`'s `repo-elephant`.
 
 ## Per-service logging
 

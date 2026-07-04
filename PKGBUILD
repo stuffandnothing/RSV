@@ -1,6 +1,6 @@
 # Maintainer: Cyridge cyridge@proton.me
 pkgname=rsv-ng
-pkgver=r59.9dacaff
+pkgver=r60.1de762a
 pkgrel=1
 pkgdesc="A runit service manager with smart completions, scaffolding, and more"
 arch=('any')
