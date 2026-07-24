@@ -11,7 +11,12 @@ _rsv() {
         'start:start one or more services'
         'stop:stop one or more services'
         'restart:restart one or more services'
+        'force-stop:stop, escalating to SIGKILL if needed'
+        'force-restart:force-stop, then start again'
         'reload:reload one or more services'
+        'kill:send a signal to a service'
+        'pause:pause one or more services (SIGSTOP)'
+        'cont:resume one or more paused services (SIGCONT)'
         'enable:enable one or more services'
         'disable:disable one or more services'
         'status:show status of one or all services'
@@ -154,14 +159,22 @@ _rsv() {
                 start|once)
                     _rsv_all
                     ;;
-                stop|restart|reload|disable|status)
+                stop|restart|force-stop|force-restart|reload|pause|cont|disable|status)
                     _rsv_enabled
+                    ;;
+                kill)
+                    if [[ ${words[CURRENT-1]} == kill ]]; then
+                        _rsv_enabled
+                    else
+                        _values 'signal' TERM KILL HUP INT QUIT USR1 USR2 CONT STOP
+                    fi
                     ;;
                 logs)
                     _arguments \
                         '--errors[show only error/warn/crit/fail lines]' \
                         '--level[filter by log level]:level:(error warn info debug crit fail emerg alert)' \
                         '--lines[show last N matching lines]:N:' \
+                        '(-f --follow)'{-f,--follow}'[keep following new entries]' \
                         '*: :->svcs'
                     [[ $state == svcs ]] && _rsv_enabled
                     ;;

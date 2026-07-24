@@ -22,8 +22,8 @@ _disable_color=0
 [[ -n "${NO_COLOR-}" ]] && _disable_color=1
 [[ ! -t 1 ]] && _disable_color=1
 [[ "${TERM-}" == "dumb" ]] && _disable_color=1
-if [[ $_disable_color -eq 0 && -n "$SUDO_USER" ]]; then
-    # sudo strips NO_COLOR — try to recover it from the parent shell's /proc environ.
+if [[ $_disable_color -eq 0 && ( -n "$SUDO_USER" || -n "$DOAS_USER" ) ]]; then
+    # sudo/doas strip NO_COLOR — try to recover it from the parent shell's /proc environ.
     # Guard: skip if parent is PID 1 (container init) or /proc is unavailable,
     # since reading init's environ would give false negatives.
     _parent_pid=""
@@ -124,6 +124,16 @@ if [[ $USER_MODE -eq 0 ]]; then
             ;;
     esac
 
+    # /var/service (void and the generic fallback) is normally created by the
+    # running system, not shipped as part of the base install. In a chroot —
+    # e.g. during a Void install, before first boot — it may not exist yet, so
+    # mkdir -p would create it as a plain directory instead of runit's actual
+    # runsvdir. Match Void's own install instructions: when runit isn't
+    # actually running, link straight into /etc/runit/runsvdir/default.
+    if [[ "$RUNSVDIR" == "/var/service" && ! -e "$RUNSVDIR" ]] && ! _is_runit_running; then
+        RUNSVDIR="/etc/runit/runsvdir/default"
+        _SYS_RUNSVDIR="/etc/runit/runsvdir/default"
+    fi
 else
     SVDIR="${RUNIT_SVDIR:-$HOME/.runit/sv}"
     RUNSVDIR="${RUNIT_RUNSVDIR:-$HOME/.runit/runsvdir}"
@@ -163,6 +173,7 @@ LOG_LEVEL=""
 LOG_LINES=10
 WATCH_INTERVAL=2
 WITH_LOG=0
+FOLLOW=0
 AS_USER=""
 _args=()
 _next_level=0
@@ -190,6 +201,8 @@ for _a in "$@"; do
         LOG_LEVEL="error|warn|crit|fail"
     elif [[ "$_a" == "--log" ]]; then
         WITH_LOG=1
+    elif [[ "$_a" == "--follow" || "$_a" == "-f" ]]; then
+        FOLLOW=1
     elif [[ "$_a" == "--level" ]]; then
         _next_level=1
     elif [[ "$_a" == --level=* ]]; then
@@ -277,7 +290,7 @@ _reexec_as_root() {
     exec "$escalator" "$0" "${new_args[@]}"
 }
 
-_NEEDS_ROOT=(start stop restart enable disable reload edit new once log-setup log-remove finish-setup)
+_NEEDS_ROOT=(start stop restart force-stop force-restart enable disable reload kill pause cont edit new once log-setup log-remove finish-setup)
 
 _check_root() {
     if [[ $EUID -ne 0 ]]; then
@@ -339,7 +352,7 @@ _check_service_exists() {
         done
     else
         local _uhome
-        _uhome=$(getent passwd "${SUDO_USER:-$USER}" 2>/dev/null | cut -d: -f6)
+        _uhome=$(getent passwd "${SUDO_USER:-${DOAS_USER:-$USER}}" 2>/dev/null | cut -d: -f6)
         local user_svdir="${RUNIT_SVDIR:-${_uhome:-$HOME}/.runit/sv}"
         if [[ -d "$user_svdir/$1" ]]; then
             _error_hint "service '$1' not found in $SVDIR" \
@@ -439,11 +452,12 @@ _sv() {
     fi
 }
 
-# When sudo strips $EDITOR, look it up from the real user's login shell
+# When sudo/doas strips $EDITOR, look it up from the real user's login shell
 _editor() {
     local ed="${EDITOR:-${VISUAL:-}}"
-    if [[ -z "$ed" && -n "$SUDO_USER" ]]; then
-        ed=$(su - "$SUDO_USER" -c 'printenv EDITOR 2>/dev/null || printenv VISUAL 2>/dev/null' 2>/dev/null)
+    local _real_user="${SUDO_USER:-$DOAS_USER}"
+    if [[ -z "$ed" && -n "$_real_user" ]]; then
+        ed=$(su - "$_real_user" -c 'printenv EDITOR 2>/dev/null || printenv VISUAL 2>/dev/null' 2>/dev/null)
     fi
 
     if [[ -n "$ed" ]] && command -v "$ed" >/dev/null 2>&1; then
@@ -516,6 +530,70 @@ _multi_svc() {
     [[ $_failed -eq 1 ]] && exit 1
 }
 
+# List all known service names across system/user service dirs.
+_all_service_names() {
+    local _dirs=("${_SVDIRS[@]:-$SVDIR}")
+    [[ $USER_MODE -eq 1 ]] && _dirs+=("${_SYS_SVDIRS[@]}")
+    local _dir svc name
+    for _dir in "${_dirs[@]}"; do
+        [[ -d "$_dir" ]] || continue
+        for svc in "$_dir"/*/; do
+            [[ -d "$svc" ]] || continue
+            name="${svc%/}"; name="${name##*/}"
+            _is_internal "$name" && continue
+            echo "$name"
+        done
+    done
+}
+
+# Expand glob-style patterns (containing *, ?, or [) in service arguments against
+# known service names. Plain names pass through unchanged so existing
+# not-found errors still apply to them. Result is left in the global array
+# _EXPANDED_SVCS (not echoed — _error_hint below must run in this shell, not
+# a captured subshell, or its `exit` would only kill the subshell).
+_expand_svc_args() {
+    _EXPANDED_SVCS=()
+    local -a _svcs=()
+    local _a _svc _matched
+    for _a in "$@"; do
+        if [[ "$_a" == *[*?[]* ]]; then
+            if [[ ${#_svcs[@]} -eq 0 ]]; then
+                mapfile -t _svcs < <(_all_service_names | sort -u)
+            fi
+            _matched=0
+            for _svc in "${_svcs[@]}"; do
+                if [[ "$_svc" == $_a ]]; then
+                    _EXPANDED_SVCS+=("$_svc")
+                    _matched=1
+                fi
+            done
+            [[ $_matched -eq 0 ]] && _error_hint "no services match pattern '$_a'" \
+                "run 'rsv list' to see available services"
+        else
+            _EXPANDED_SVCS+=("$_a")
+        fi
+    done
+}
+
+# Like _multi_svc, but expands glob patterns in the service arguments first.
+_multi_svc_glob() {
+    local _cmd="$1"; shift
+    _expand_svc_args "$@"
+    _multi_svc "$_cmd" "${_EXPANDED_SVCS[@]}"
+}
+
+# Like _multi_svc, but passes a fixed extra argument (e.g. a signal) after
+# each service name. Used by kill, where the signal is shared across all
+# glob-matched services.
+_multi_svc_extra() {
+    local _cmd="$1" _extra="$2"; shift 2
+    local _failed=0
+    for _svc in "$@"; do
+        ( "$_cmd" "$_svc" "$_extra" ) || _failed=1
+    done
+    [[ $_failed -eq 1 ]] && exit 1
+}
+
 # --- Service commands ---------------------------------------------------------
 
 cmd_start() {
@@ -562,6 +640,54 @@ cmd_reload() {
     _check_service_exists "$1"
     _check_service_enabled "$1"
     _sv reload "$1" >/dev/null && _ok "reloaded '$1'" || _error "failed to reload '$1' (service may not support reload)"
+}
+
+# force-stop/force-restart send TERM, wait up to 7s, then KILL and wait up to
+# 7s more (runit's own escalation) — so timeouts here are longer than plain
+# stop/restart to give that full window room to complete.
+cmd_force_stop() {
+    _check_service_exists "$1"
+    _check_service_enabled "$1"
+    check_run "$1" && : || _soft_error_hint "'$1' is not running"
+    local pid; pid=$(cat "$RUNSVDIR/$1/supervise/pid" 2>/dev/null)
+    _sv force-stop "$1" >/dev/null 2>&1 || _error "failed to force-stop '$1'"
+    _wait_for "sv status '$RUNSVDIR/$1' 2>&1 | grep -q '^down:'" 15 "$(_info Force-stopping) '$1'"
+    rm -f "$RUNSVDIR/.rsv-once.$1"
+    _ok "force-stopped '$1'${pid:+ (pid $pid)}"
+}
+
+cmd_force_restart() {
+    _check_service_exists "$1"
+    _check_service_enabled "$1"
+    local old_pid; old_pid=$(cat "$RUNSVDIR/$1/supervise/pid" 2>/dev/null)
+    _sv force-restart "$1" >/dev/null 2>&1 || _error "failed to force-restart '$1'"
+    _wait_for "[[ -s '$RUNSVDIR/$1/supervise/pid' ]] && [[ \$(cat '$RUNSVDIR/$1/supervise/pid') != '$old_pid' ]]" 20 "$(_info Force-restarting) '$1'"
+    local pid; pid=$(cat "$RUNSVDIR/$1/supervise/pid" 2>/dev/null)
+    _ok "force-restarted '$1'${pid:+ (pid $pid)}"
+}
+
+cmd_kill() {
+    _check_service_exists "$1"
+    _check_service_enabled "$1"
+    check_run "$1" || _soft_error_hint "'$1' is not running"
+    local pid; pid=$(cat "$RUNSVDIR/$1/supervise/pid" 2>/dev/null)
+    [[ -z "$pid" ]] && _error "could not determine pid for '$1'"
+    local sig="${2:-TERM}"
+    kill -s "$sig" "$pid" 2>/dev/null || _error "failed to send signal '$sig' to '$1' (pid $pid) — is it a valid signal?"
+    _ok "sent signal '$sig' to '$1' (pid $pid)"
+}
+
+cmd_pause() {
+    _check_service_exists "$1"
+    _check_service_enabled "$1"
+    check_run "$1" || _soft_error_hint "'$1' is not running"
+    _sv pause "$1" >/dev/null && _ok "paused '$1'" || _error "failed to pause '$1'"
+}
+
+cmd_cont() {
+    _check_service_exists "$1"
+    _check_service_enabled "$1"
+    _sv cont "$1" >/dev/null && _ok "continued '$1'" || _error "failed to continue '$1'"
 }
 
 cmd_enable() {
@@ -892,12 +1018,18 @@ cmd_logs() {
         fi
 
         if [[ -n "$log" ]]; then
-            tail -F "$log" | _lgrep_live | _colorize_log
+            if [[ $FOLLOW -eq 1 ]]; then
+                tail -n "$LOG_LINES" -F "$log" | _lgrep_live | _colorize_log
+            else
+                tail -n "$LOG_LINES" "$log" | _lgrep | _colorize_log
+            fi
         elif [[ -f "$LOG_FILE" ]]; then
             [[ ! -f "$log_run" ]] && _info "tip: run 'rsv log-setup $1' to enable per-service logging"
             tail -n "$((LOG_LINES * 100))" "$LOG_FILE" | grep -av '\[sudo\]' | grep -ai "$1" | _lgrep | tail -"$LOG_LINES" | _colorize_log
-            _info "following new entries (Ctrl-C to stop)..."
-            tail -Fn0 "$LOG_FILE" | grep --line-buffered -av '\[sudo\]' | grep --line-buffered -ai "$1" | _lgrep_live | _colorize_log
+            if [[ $FOLLOW -eq 1 ]]; then
+                _info "following new entries (Ctrl-C to stop)..."
+                tail -Fn0 "$LOG_FILE" | grep --line-buffered -av '\[sudo\]' | grep --line-buffered -ai "$1" | _lgrep_live | _colorize_log
+            fi
         else
             _error "no per-service log found and no global log at $LOG_FILE"
         fi
@@ -905,7 +1037,11 @@ cmd_logs() {
         if [[ ! -f "$LOG_FILE" ]]; then
             _error "no global log at $LOG_FILE"
         fi
-        tail -F "$LOG_FILE" | _lgrep_live | _colorize_log
+        if [[ $FOLLOW -eq 1 ]]; then
+            tail -n "$LOG_LINES" -F "$LOG_FILE" | _lgrep_live | _colorize_log
+        else
+            tail -n "$LOG_LINES" "$LOG_FILE" | _lgrep | _colorize_log
+        fi
     fi
 }
 
@@ -1042,6 +1178,9 @@ usage() {
     echo ""
     echo -e "${BOLD}usage:${NC} rsv [--user] <command> [service]"
     echo ""
+    echo "  service arguments accept glob patterns (*, ?, [...]) matched against"
+    echo "  known service names, e.g. rsv restart 'web-*'"
+    echo ""
     echo -e "${BOLD}flags:${NC}"
     echo "  --user              operate on user services (auto-set when not root)"
     echo "  --as-user <user>    manage another user's services (requires r/w access)"
@@ -1049,6 +1188,7 @@ usage() {
     echo "  --errors            with logs: show only error/warn/crit/fail lines"
     echo "  --level <levels>    with logs: filter by level e.g. --level error,warn"
     echo "  --lines <N>         with logs: show last N matching lines (default 10)"
+    echo "  -f, --follow        with logs: keep following new entries (Ctrl-C to stop)"
     echo "  --log               with new: also scaffold a log service"
     echo "  --interval <N>      with watch: refresh every N seconds (default 2)"
     echo ""
@@ -1057,9 +1197,14 @@ usage() {
     echo "  start   <svc...>    start one or more services"
     echo "  stop    <svc...>    stop one or more services"
     echo "  restart <svc...>    restart one or more services"
+    echo "  force-stop    <svc...>    stop, escalating to SIGKILL if needed"
+    echo "  force-restart <svc...>    force-stop, then start again"
     echo "  reload  <svc...>    reload one or more services"
     echo "  enable  <svc...>    enable one or more services"
     echo "  disable <svc...>    disable one or more services"
+    echo "  kill    <svc> [sig] send a signal to a service (default: TERM)"
+    echo "  pause   <svc...>    pause one or more services (SIGSTOP)"
+    echo "  cont    <svc...>    resume one or more paused services (SIGCONT)"
     echo "  status  [svc...]    show status of listed (or all enabled) services"
     echo "  list                list all available services and their state"
     echo "  logs    [service]   tail logs for a service (or global log)"
@@ -1080,7 +1225,7 @@ usage() {
     echo "  sv dir:   ~/.runit/sv          (override: \$RUNIT_SVDIR)"
     echo "  run dir:  ~/.runit/runsvdir    (override: \$RUNIT_RUNSVDIR)"
     echo ""
-    echo -e "${BOLD}commands requiring root (system mode):${NC} start stop restart reload enable disable"
+    echo -e "${BOLD}commands requiring root (system mode):${NC} start stop restart force-stop force-restart reload enable disable kill pause cont"
 }
 
 
@@ -1092,29 +1237,35 @@ CMD="$1"
 [[ $WITH_LOG -eq 1 && "$1" != "new" ]] && _warn "--log has no effect for '$1', ignoring"
 [[ -n "$LOG_LEVEL" && "$1" != "logs" ]] && _warn "--errors/--level has no effect for '$1', ignoring"
 [[ "$LOG_LINES" != "10" && "$1" != "logs" ]] && _warn "--lines has no effect for '$1', ignoring"
+[[ $FOLLOW -eq 1 && "$1" != "logs" ]] && _warn "--follow has no effect for '$1', ignoring"
 [[ "$WATCH_INTERVAL" != "2" && "$1" != "watch" ]] && _warn "--interval has no effect for '$1', ignoring"
 
 _needs_root "$1" && _check_root "$1" || true
 
 case "$1" in
     init)         [[ $USER_MODE -eq 0 ]] && _error "'init' is only available in user mode" || cmd_init ;;
-    start)        [[ -z "$2" ]] && usage || _multi_svc cmd_start "${@:2}" ;;
-    stop)         [[ -z "$2" ]] && usage || _multi_svc cmd_stop "${@:2}" ;;
-    restart)      [[ -z "$2" ]] && usage || _multi_svc cmd_restart "${@:2}" ;;
-    reload)       [[ -z "$2" ]] && usage || _multi_svc cmd_reload "${@:2}" ;;
-    enable)       [[ -z "$2" ]] && usage || _multi_svc cmd_enable "${@:2}" ;;
-    disable)      [[ -z "$2" ]] && usage || _multi_svc cmd_disable "${@:2}" ;;
-    status)       if [[ -n "$2" ]]; then _multi_svc cmd_status "${@:2}"; else cmd_status; fi ;;
+    start)        [[ -z "$2" ]] && usage || _multi_svc_glob cmd_start "${@:2}" ;;
+    stop)         [[ -z "$2" ]] && usage || _multi_svc_glob cmd_stop "${@:2}" ;;
+    restart)      [[ -z "$2" ]] && usage || _multi_svc_glob cmd_restart "${@:2}" ;;
+    force-stop)    [[ -z "$2" ]] && usage || _multi_svc_glob cmd_force_stop "${@:2}" ;;
+    force-restart) [[ -z "$2" ]] && usage || _multi_svc_glob cmd_force_restart "${@:2}" ;;
+    reload)       [[ -z "$2" ]] && usage || _multi_svc_glob cmd_reload "${@:2}" ;;
+    kill)         [[ -z "$2" ]] && usage || { _expand_svc_args "$2"; _multi_svc_extra cmd_kill "$3" "${_EXPANDED_SVCS[@]}"; } ;;
+    pause)        [[ -z "$2" ]] && usage || _multi_svc_glob cmd_pause "${@:2}" ;;
+    cont)         [[ -z "$2" ]] && usage || _multi_svc_glob cmd_cont "${@:2}" ;;
+    enable)       [[ -z "$2" ]] && usage || _multi_svc_glob cmd_enable "${@:2}" ;;
+    disable)      [[ -z "$2" ]] && usage || _multi_svc_glob cmd_disable "${@:2}" ;;
+    status)       if [[ -n "$2" ]]; then _multi_svc_glob cmd_status "${@:2}"; else cmd_status; fi ;;
     list)         cmd_list ;;
     logs)         cmd_logs "$2" ;;
-    edit)         [[ -z "$2" ]] && usage || _multi_svc cmd_edit "${@:2}" ;;
+    edit)         [[ -z "$2" ]] && usage || _multi_svc_glob cmd_edit "${@:2}" ;;
     new)          [[ -z "$2" ]] && usage || cmd_new "$2" ;;
     doctor)       cmd_doctor ;;
-    once)         [[ -z "$2" ]] && usage || _multi_svc cmd_once "${@:2}" ;;
+    once)         [[ -z "$2" ]] && usage || _multi_svc_glob cmd_once "${@:2}" ;;
     watch)        cmd_watch "$2" ;;
-    log-setup)    [[ -z "$2" ]] && usage || _multi_svc cmd_log_setup "${@:2}" ;;
-    log-remove)   [[ -z "$2" ]] && usage || _multi_svc cmd_log_remove "${@:2}" ;;
-    finish-setup) [[ -z "$2" ]] && usage || _multi_svc cmd_finish_setup "${@:2}" ;;
+    log-setup)    [[ -z "$2" ]] && usage || _multi_svc_glob cmd_log_setup "${@:2}" ;;
+    log-remove)   [[ -z "$2" ]] && usage || _multi_svc_glob cmd_log_remove "${@:2}" ;;
+    finish-setup) [[ -z "$2" ]] && usage || _multi_svc_glob cmd_finish_setup "${@:2}" ;;
     help|--help|usage) usage ;;
     *)            usage && easter_egg;;
 esac

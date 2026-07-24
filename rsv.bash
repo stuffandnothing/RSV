@@ -4,7 +4,7 @@ _rsv() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="start stop restart reload enable disable status list logs edit new init once watch doctor log-setup log-remove finish-setup help"
+    local commands="start stop restart force-stop force-restart reload kill pause cont enable disable status list logs edit new init once watch doctor log-setup log-remove finish-setup help"
 
     # Distro-aware system paths
     local svdir runsvdir
@@ -101,12 +101,19 @@ _rsv() {
         start|once)
             COMPREPLY=($(compgen -W "$(_rsv_all)" -- "$cur"))
             ;;
-        stop|restart|reload|disable|status)
+        stop|restart|force-stop|force-restart|reload|pause|cont|disable|status)
             COMPREPLY=($(compgen -W "$(_rsv_enabled)" -- "$cur"))
+            ;;
+        kill)
+            if [[ "$prev" == "kill" ]]; then
+                COMPREPLY=($(compgen -W "$(_rsv_enabled)" -- "$cur"))
+            else
+                COMPREPLY=($(compgen -W "TERM KILL HUP INT QUIT USR1 USR2 CONT STOP" -- "$cur"))
+            fi
             ;;
         logs)
             if [[ "$cur" == --* ]]; then
-                COMPREPLY=($(compgen -W "--errors --level --lines" -- "$cur"))
+                COMPREPLY=($(compgen -W "--errors --level --lines --follow" -- "$cur"))
             else
                 COMPREPLY=($(compgen -W "$(_rsv_enabled)" -- "$cur"))
             fi

@@ -21,6 +21,14 @@ Most service commands accept one or more service names.
 When multiple names are given, each is processed in turn;
 a failure for one service is reported but does not prevent
 the remaining services from being processed.
+.PP
+Service name arguments may also be shell-style glob patterns
+(\fB*\fR, \fB?\fR, \fB[...]\fR), matched against the names of known
+services.
+A pattern is expanded to every matching service before the command
+runs; a pattern that matches nothing is an error.
+Quote patterns to stop the calling shell from expanding them against
+files in the current directory first, e.g.\& \fIrsv restart 'web\-*'\fR.
 .SH OPTIONS
 .TP
 .B \-\-user
@@ -58,8 +66,14 @@ level keywords (e.g.\& \fI\-\-level error,warn\fR).
 \fB\-\-lines\fR \fIN\fR
 Used with
 .BR logs :
-show the last \fIN\fR matching lines before following new output
+show the last \fIN\fR matching lines
 (default: 10).
+.TP
+.BR \-f ", " \-\-follow
+Used with
+.BR logs :
+keep following new log output after printing the last \fIN\fR lines,
+instead of printing them and exiting.
 .TP
 .BR \-u ", " \-\-uptime
 Used with
@@ -101,9 +115,41 @@ Stop one or more running services.
 Restart one or more services.
 Waits for each service to get a new PID before reporting success.
 .TP
+\fBforce\-stop\fR \fIservice\fR...
+Stop one or more services, escalating to SIGKILL if the service does
+not go down after a TERM signal.
+Delegates to
+.BR sv (8)
+.BR force\-stop ,
+which waits up to 7 seconds after TERM before sending KILL and
+waiting up to 7 more seconds.
+.TP
+\fBforce\-restart\fR \fIservice\fR...
+Equivalent to
+.B force\-stop
+followed by
+.BR start .
+.TP
 \fBreload\fR \fIservice\fR...
 Send the reload signal (SIGHUP) to one or more services.
 Not all services support reloading; an error is printed for those that do not.
+.TP
+\fBkill\fR \fIservice\fR [\fIsignal\fR]
+Send a signal to a running service's process
+(default: \fITERM\fR).
+The signal may be given by name (with or without the
+.I SIG
+prefix) or number, as accepted by
+.BR kill (1).
+.TP
+\fBpause\fR \fIservice\fR...
+Pause one or more running services by sending SIGSTOP.
+The process remains resident but stops executing until resumed.
+.TP
+\fBcont\fR \fIservice\fR...
+Resume one or more services previously paused with
+.BR pause ,
+by sending SIGCONT.
 .TP
 \fBonce\fR \fIservice\fR...
 Run one or more services once without supervision
@@ -142,15 +188,17 @@ Display an auto-refreshing status view, similar to
 Without a service name, shows all enabled services.
 .SS Logs
 .TP
-\fBlogs\fR [\fIservice\fR] [\fB\-\-errors\fR] [\fB\-\-level\fR \fIlevels\fR] [\fB\-\-lines\fR \fIN\fR]
-Follow log output.
+\fBlogs\fR [\fIservice\fR] [\fB\-\-errors\fR] [\fB\-\-level\fR \fIlevels\fR] [\fB\-\-lines\fR \fIN\fR] [\fB\-f\fR|\fB\-\-follow\fR]
+Print recent log output and exit; with
+.BR \-\-follow ,
+keep following new output instead (Ctrl\-C to stop).
 .RS
 .IP \(bu 2
 With a service name: use the service's own
 .BR svlogd (8)
 log if one is configured, otherwise grep the global log.
 .IP \(bu 2
-Without a service name: follow the global log file.
+Without a service name: use the global log file.
 .RE
 .SS Service creation and editing
 .TP
@@ -233,10 +281,28 @@ Editor opened by
 and
 .BR new .
 When running under
-.BR sudo (8),
+.BR sudo (8)
+or
+.BR doas (8),
 .B rsv
 attempts to recover the real user's editor from their login
 shell if these variables are stripped.
+.TP
+.B SUDO_USER ", " DOAS_USER
+Set automatically by
+.BR sudo (8)
+and
+.BR doas (8)
+respectively, identifying the original non-root user.
+.B rsv
+uses whichever is set to recover that user's home directory
+(for locating their user-mode service directory) and login shell
+(for
+.BR EDITOR / VISUAL
+and
+.BR NO_COLOR
+recovery).
+Do not set these directly.
 .TP
 .B NO_COLOR
 Disable all colour output (see \fIhttps://no-color.org\fR).
@@ -320,11 +386,44 @@ rsv enable \-\-now nginx redis postgresql
 .EE
 .RE
 .PP
+Restart every service matching a glob pattern:
+.PP
+.RS
+.EX
+rsv restart 'web\-*'
+.EE
+.RE
+.PP
 Watch error-level log lines for a service:
 .PP
 .RS
 .EX
 rsv logs \-\-errors nginx
+.EE
+.RE
+.PP
+Follow a service's log continuously:
+.PP
+.RS
+.EX
+rsv logs \-\-follow nginx
+.EE
+.RE
+.PP
+Send SIGKILL to a stuck service:
+.PP
+.RS
+.EX
+rsv kill nginx KILL
+.EE
+.RE
+.PP
+Pause a service and resume it later:
+.PP
+.RS
+.EX
+rsv pause nginx
+rsv cont nginx
 .EE
 .RE
 .PP

@@ -50,7 +50,7 @@ end
 # Helper: no rsv subcommand seen yet
 function __rsv_no_cmd
     set -l tokens (commandline -opc)
-    for cmd in start stop restart reload enable disable status list logs edit new init once watch doctor log-setup log-remove finish-setup help
+    for cmd in start stop restart force-stop force-restart reload kill pause cont enable disable status list logs edit new init once watch doctor log-setup log-remove finish-setup help
         if contains -- $cmd $tokens
             return 1
         end
@@ -163,7 +163,12 @@ complete -c rsv -f -n "test (commandline -opc)[-1] = --as-user" \
 complete -c rsv -f -n __rsv_no_cmd -a "start"        -d "start one or more services"
 complete -c rsv -f -n __rsv_no_cmd -a "stop"         -d "stop one or more services"
 complete -c rsv -f -n __rsv_no_cmd -a "restart"      -d "restart one or more services"
+complete -c rsv -f -n __rsv_no_cmd -a "force-stop"    -d "stop, escalating to SIGKILL if needed"
+complete -c rsv -f -n __rsv_no_cmd -a "force-restart" -d "force-stop, then start again"
 complete -c rsv -f -n __rsv_no_cmd -a "reload"       -d "reload one or more services"
+complete -c rsv -f -n __rsv_no_cmd -a "kill"         -d "send a signal to a service"
+complete -c rsv -f -n __rsv_no_cmd -a "pause"        -d "pause one or more services (SIGSTOP)"
+complete -c rsv -f -n __rsv_no_cmd -a "cont"         -d "resume one or more paused services (SIGCONT)"
 complete -c rsv -f -n __rsv_no_cmd -a "enable"       -d "enable one or more services"
 complete -c rsv -f -n __rsv_no_cmd -a "disable"      -d "disable one or more services"
 complete -c rsv -f -n __rsv_no_cmd -a "status"       -d "show status of one or all services"
@@ -185,7 +190,15 @@ complete -c rsv -f -n __rsv_no_cmd -a "help"         -d "show usage information"
 complete -c rsv -f -n "__rsv_cmd_is start"   -a "(__rsv_all_services)"
 complete -c rsv -f -n "__rsv_cmd_is stop"    -a "(__rsv_enabled_services)"
 complete -c rsv -f -n "__rsv_cmd_is restart" -a "(__rsv_enabled_services)"
+complete -c rsv -f -n "__rsv_cmd_is force-stop"    -a "(__rsv_enabled_services)"
+complete -c rsv -f -n "__rsv_cmd_is force-restart" -a "(__rsv_enabled_services)"
 complete -c rsv -f -n "__rsv_cmd_is reload"  -a "(__rsv_enabled_services)"
+complete -c rsv -f -n "__rsv_cmd_is kill; and test (commandline -opc)[-1] = kill" \
+    -a "(__rsv_enabled_services)"
+complete -c rsv -f -n "__rsv_cmd_is kill; and test (commandline -opc)[-1] != kill" \
+    -a "TERM KILL HUP INT QUIT USR1 USR2 CONT STOP" -d "signal"
+complete -c rsv -f -n "__rsv_cmd_is pause"   -a "(__rsv_enabled_services)"
+complete -c rsv -f -n "__rsv_cmd_is cont"    -a "(__rsv_enabled_services)"
 complete -c rsv -f -n "__rsv_cmd_is disable" -a "(__rsv_enabled_services)"
 complete -c rsv -f -n "__rsv_cmd_is status"  -a "(__rsv_enabled_services)"
 complete -c rsv -f -n "__rsv_cmd_is logs"    -a "(__rsv_enabled_services)"
@@ -218,3 +231,5 @@ complete -c rsv -f -n "__rsv_cmd_is logs; and test (commandline -opc)[-1] = --le
     -a "error warn info debug crit fail emerg alert" -d "log level"
 complete -c rsv -f -n "__rsv_cmd_is logs; and not contains -- --lines (commandline -opc)" \
     -a "--lines"  -d "show last N matching lines (default 10)"
+complete -c rsv -f -n "__rsv_cmd_is logs; and not contains -- --follow -f (commandline -opc)" \
+    -a "--follow -f" -d "keep following new entries"
