@@ -15,6 +15,7 @@ for arch in x86_64 x86_64-musl; do
 	[ -n "$(ls -A "$d"/*.xbps 2>/dev/null)" ] || continue
 
 	XBPS_ARCH="$arch" xbps-rindex -a "$d"/*.xbps
+	XBPS_ARCH="$arch" xbps-rindex -S "$d"/*.xbps --privkey /tmp/privkey.pem
 	XBPS_ARCH="$arch" xbps-rindex -s "$d" --signedby "$SIGN_NAME" --privkey /tmp/privkey.pem
 	cp /tmp/pubkey.pem "$d/pubkey.pem"
 done
