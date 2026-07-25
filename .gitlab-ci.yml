@@ -3,7 +3,7 @@ stages:
 
 test:
   stage: build
-  image: ghcr.io/void-linux/void-glibc-full:latest
+  image: debian:bookworm-slim
   script:
     - echo hello
     - echo world
