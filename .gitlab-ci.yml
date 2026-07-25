@@ -12,11 +12,11 @@
 # (`docker run` without --security-opt seccomp=unconfined reproduces the
 # same "failed to unshare from the current namespace" failure GitLab hit).
 #
-# Two known xbps-src/ethereal quirks worked around below (also verified
-# locally, both against the actual void-linux/void-packages HEAD):
+# Two known xbps-src/ethereal quirks worked around in ci-prepare.sh (also
+# verified locally, both against the actual void-linux/void-packages HEAD):
 #   1. Ethereal requires XBPS_MASTERDIR symlinked to `/`, which makes
 #      `cp -f /etc/resolv.conf $XBPS_MASTERDIR/etc` copy the file onto
-#      itself - GNU cp errors on that. Patched via sed in before_script.
+#      itself - GNU cp errors on that. Patched via sed.
 #   2. The void-packages checkout must NOT live at exactly `/void-packages`
 #      (that's the literal path ethereal symlinks itself to under
 #      XBPS_MASTERDIR=/, so cloning there is a self-referential collision).
@@ -25,6 +25,16 @@
 #      (there's only ever one masterdir = `/`, so the flag is silently
 #      ignored). Instead, each arch uses its own native void-*-full image
 #      and builds natively - no -A flag.
+#
+# The prepare/sign logic lives in ci-prepare.sh/ci-sign.sh rather than
+# inline here: GitLab's docker-executor script generation doesn't behave
+# like a plain `sh -c '...'`, and a heavily-escaped inline sed one-liner
+# tried here previously broke shell parsing before any command even ran
+# (bare "sh: N: Syntax error" with no line echoed - confirmed by testing
+# the exact inline form locally under dash, where it worked fine in
+# isolation, meaning the failure was specific to how GitLab assembles the
+# job script, not the shell itself). A real script file sidesteps the
+# whole class of escaping bugs.
 #
 # Required CI/CD variables (Settings > CI/CD > Variables, masked+protected):
 #   SIGN_PRIVKEY_B64  - base64 of your xbps-rindex private key (privkey.pem)
@@ -54,16 +64,8 @@ stages:
 .build_template: &build_template
   stage: build
   before_script:
-    - mkdir -p /build && cd /build
-    - xbps-install -Suy xbps
-    - xbps-install -S
-    - xbps-install -y bash git perl libarchive file
-    - git clone --depth 1 https://github.com/void-linux/void-packages.git
-    - cp -r "$CI_PROJECT_DIR"/srcpkgs/. void-packages/srcpkgs/
-    - cd void-packages
-    # work around ethereal + XBPS_MASTERDIR=/ copying resolv.conf onto itself
-    - sed -i "s#cp -f /etc/resolv.conf \$XBPS_MASTERDIR/etc#[ \"\$(readlink -f /etc/resolv.conf)\" = \"\$(readlink -f \$XBPS_MASTERDIR/etc/resolv.conf)\" ] || cp -f /etc/resolv.conf \$XBPS_MASTERDIR/etc#" common/xbps-src/shutils/chroot.sh
-    - ln -s / masterdir
+    - sh "$CI_PROJECT_DIR"/ci-prepare.sh
+    - cd /build/void-packages
     - export XBPS_CHROOT_CMD=ethereal
     - export XBPS_ALLOW_CHROOT_BREAKOUT=yes
   artifacts:
@@ -101,15 +103,7 @@ index_sign_deploy:
     - mkdir -p /tmp/xbps-static && tar -xf xbps-static-latest.x86_64-musl.tar.xz -C /tmp/xbps-static
     - export PATH="/tmp/xbps-static/usr/bin:$PATH"
   script:
-    - echo "$SIGN_PRIVKEY_B64" | base64 -d > /tmp/privkey.pem
-    - openssl rsa -in /tmp/privkey.pem -pubout -out /tmp/pubkey.pem
-    - for arch in x86_64 x86_64-musl; do
-        d="public/$arch";
-        [ -d "$d" ] && [ -n "$(ls -A "$d"/*.xbps 2>/dev/null)" ] || continue;
-        XBPS_ARCH="$arch" xbps-rindex -a "$d"/*.xbps;
-        XBPS_ARCH="$arch" xbps-rindex -s "$d" --signedby "$SIGN_NAME" --privkey /tmp/privkey.pem;
-        cp /tmp/pubkey.pem "$d/pubkey.pem";
-      done
+    - sh "$CI_PROJECT_DIR"/ci-sign.sh
   artifacts:
     paths:
       - public/
