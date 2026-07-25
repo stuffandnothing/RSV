@@ -1,0 +1,3 @@
+# See Dockerfile.void-glibc-bash for why this exists.
+FROM ghcr.io/void-linux/void-musl-full:latest
+RUN xbps-install -Suy xbps && xbps-install -Sy && xbps-install -y bash git perl libarchive file

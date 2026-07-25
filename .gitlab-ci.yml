@@ -36,6 +36,18 @@
 # job script, not the shell itself). A real script file sidesteps the
 # whole class of escaping bugs.
 #
+# build-images stage: the official void-*-full images ship with no bash at
+# all. GitLab's shared-runner docker executor falls back to /bin/sh (dash)
+# for bash-less images, and that sh code path is currently broken on
+# GitLab.com's shared runners - confirmed directly: a bare `echo hello`
+# job on ghcr.io/void-linux/void-glibc-full:latest fails with
+# "/usr/bin/sh: 7: Syntax error" with NO script content of ours involved,
+# while the identical job on any bash-having image (e.g. debian:bookworm-
+# slim) succeeds immediately. So we rebuild the two void-*-full images
+# with bash added (Dockerfile.void-glibc-bash / Dockerfile.void-musl-bash)
+# and push them to this project's own Container Registry before the build
+# jobs run, using the CI-provided registry token - no extra setup needed.
+#
 # Required CI/CD variables (Settings > CI/CD > Variables, masked+protected):
 #   SIGN_PRIVKEY_B64  - base64 of your xbps-rindex private key (privkey.pem)
 #   SIGN_NAME         - e.g. "Your Name <you@example.com>"
@@ -58,11 +70,28 @@ variables:
   PACKAGES: "rsv-ng"
 
 stages:
+  - build-images
   - build
   - deploy
 
+build-images:
+  stage: build-images
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - docker build --pull -t "$CI_REGISTRY_IMAGE/void-glibc-bash:latest" -f Dockerfile.void-glibc-bash .
+    - docker push "$CI_REGISTRY_IMAGE/void-glibc-bash:latest"
+    - docker build --pull -t "$CI_REGISTRY_IMAGE/void-musl-bash:latest" -f Dockerfile.void-musl-bash .
+    - docker push "$CI_REGISTRY_IMAGE/void-musl-bash:latest"
+
 .build_template: &build_template
   stage: build
+  needs:
+    - build-images
   before_script:
     - sh "$CI_PROJECT_DIR"/ci-prepare.sh
     - cd /build/void-packages
@@ -75,7 +104,7 @@ stages:
 
 build:x86_64:
   <<: *build_template
-  image: ghcr.io/void-linux/void-glibc-full:latest
+  image: $CI_REGISTRY_IMAGE/void-glibc-bash:latest
   script:
     - for pkg in $PACKAGES; do ./xbps-src pkg "$pkg"; done
     - mkdir -p "$CI_PROJECT_DIR/public/x86_64"
@@ -83,7 +112,7 @@ build:x86_64:
 
 build:x86_64-musl:
   <<: *build_template
-  image: ghcr.io/void-linux/void-musl-full:latest
+  image: $CI_REGISTRY_IMAGE/void-musl-bash:latest
   script:
     - for pkg in $PACKAGES; do ./xbps-src pkg "$pkg"; done
     - mkdir -p "$CI_PROJECT_DIR/public/x86_64-musl"

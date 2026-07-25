@@ -1,0 +1,11 @@
+# Adds bash to the official void-glibc-full image.
+#
+# GitLab's shared-runner docker executor probes each job image for bash and
+# only falls back to /bin/sh (dash) when it's missing - and that sh-script
+# code path is currently broken on GitLab.com's shared runners (confirmed:
+# a bare `echo hello` job on ghcr.io/void-linux/void-glibc-full:latest fails
+# with "/usr/bin/sh: 7: Syntax error", while the identical job on any image
+# that has bash succeeds immediately). Void's images ship without bash by
+# design, so we bake it in here instead of fighting the fallback.
+FROM ghcr.io/void-linux/void-glibc-full:latest
+RUN xbps-install -Suy xbps && xbps-install -Sy && xbps-install -y bash git perl libarchive file
