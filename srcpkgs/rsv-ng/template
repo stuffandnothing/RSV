@@ -1,0 +1,36 @@
+# Template file for 'rsv-ng'
+#
+# This is a snapshot package: it pins a specific commit of the rsv-main
+# repo rather than tracking git HEAD (xbps-src has no VCS-package concept
+# like AUR's pkgver()). To release an update:
+#   1. bump _commit to the new tip
+#   2. bump version (e.g. to the new `git rev-list --count HEAD`)
+#   3. reset revision=1
+#   4. clear checksum, run `./xbps-src fetch rsv-ng`, and copy the reported
+#      hash back in (or: curl -L <distfiles URL> | sha256sum)
+#
+pkgname=rsv-ng
+version=62
+revision=1
+_commit=b1db96b9bc49c18eac9df8fad2e87d38e0766e5c
+distfiles="https://gitlab.com/runit-rsv/rsv-main/-/archive/${_commit}/rsv-main-${_commit}.tar.gz"
+checksum=5ea87e3f0a2c8f4cf103aa5638ae84adcf270cc71b4cdb1925c149a9bb531892
+wrksrc="rsv-main-${_commit}"
+
+depends="runit bash"
+short_desc="Runit service manager with smart completions, scaffolding, and more"
+maintainer="Cyridge <cyridge@proton.me>"
+license="GPL-2.0-only"
+homepage="https://gitlab.com/runit-rsv/rsv-main"
+conflicts="rsv"
+noarch=yes
+
+do_install() {
+	vbin rsv
+	vcompletion rsv.bash bash
+	vcompletion rsv.fish fish
+	vcompletion rsv.zsh zsh
+	vman rsv.1
+	vlicense LICENSE
+	vdoc README.md
+}

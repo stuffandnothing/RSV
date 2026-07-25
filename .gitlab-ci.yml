@@ -1,0 +1,103 @@
+# .gitlab-ci.yml
+#
+# Builds a custom Void Linux (xbps) repo for x86_64 and x86_64-musl
+# entirely inside GitLab CI, using xbps-src's own self-bootstrapping
+# chroot (no official Void docker image required).
+#
+# Required CI/CD variables (Settings > CI/CD > Variables, masked+protected):
+#   SIGN_PRIVKEY_B64  - base64 of your xbps-rindex private key (privkey.pem)
+#   SIGN_NAME         - e.g. "Your Name <you@example.com>"
+#
+# Generate the key once, locally, on any machine (not the runner).
+# xbps-rindex creates the RSA key automatically the first time you sign
+# a repo with a --privkey path that doesn't exist yet - so build/index
+# any package(s) into a local dir first, then:
+#   xbps-rindex -a somerepo/*.xbps
+#   xbps-rindex -s somerepo --signedby "Your Name <you@example.com>" --privkey privkey.pem
+#   base64 -w0 privkey.pem   -> paste as SIGN_PRIVKEY_B64
+#
+# A standalone pubkey.pem isn't required - xbps-install fetches the
+# public key from the signed repodata automatically on first install.
+# The deploy job below also drops one in each arch dir for people who
+# prefer to preload it into /var/db/xbps/keys/ manually.
+#
+# List the packages you maintain (from void-packages srcpkgs/) here:
+variables:
+  PACKAGES: "rsv-ng"
+
+stages:
+  - build
+  - deploy
+
+.build_template: &build_template
+  stage: build
+  image: debian:bookworm-slim
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends
+        git curl ca-certificates tar xz-utils unzip
+        build-essential bash coreutils gawk sed
+        flock perl libarchive-tools socat rsync
+    - git clone --depth 1 https://github.com/void-linux/void-packages.git
+    - cp -rv srcpkgs/. void-packages/srcpkgs/
+    - cd void-packages
+    - echo "XBPS_ALLOW_CHROOT_BREAKOUT=yes" >> etc/conf
+  artifacts:
+    paths:
+      - public/
+    expire_in: 1 hour
+
+build:x86_64:
+  <<: *build_template
+  script:
+    - ./xbps-src binary-bootstrap
+    - for pkg in $PACKAGES; do ./xbps-src pkg "$pkg"; done
+    - mkdir -p ../public/x86_64
+    - cp hostdir/binpkgs/*.x86_64.xbps ../public/x86_64/ 2>/dev/null || true
+
+build:x86_64-musl:
+  <<: *build_template
+  script:
+    - ./xbps-src -A x86_64-musl binary-bootstrap
+    - for pkg in $PACKAGES; do ./xbps-src -A x86_64-musl pkg "$pkg"; done
+    - mkdir -p ../public/x86_64-musl
+    - cp hostdir/binpkgs/*.x86_64-musl.xbps ../public/x86_64-musl/ 2>/dev/null || true
+
+index_sign_deploy:
+  stage: deploy
+  image: debian:bookworm-slim
+  needs:
+    - build:x86_64
+    - build:x86_64-musl
+  before_script:
+    # grab static xbps tools (xbps-rindex) instead of any Void image -
+    # always current, since it's the same binaries xbps-src itself uses
+    - apt-get update && apt-get install -y --no-install-recommends curl ca-certificates xz-utils openssl
+    - curl -LO https://repo-default.voidlinux.org/static/xbps-static-latest.x86_64-musl.tar.xz
+    - mkdir -p /tmp/xbps-static && tar -xf xbps-static-latest.x86_64-musl.tar.xz -C /tmp/xbps-static
+    - export PATH="/tmp/xbps-static/usr/bin:$PATH"
+  script:
+    - echo "$SIGN_PRIVKEY_B64" | base64 -d > /tmp/privkey.pem
+    - openssl rsa -in /tmp/privkey.pem -pubout -out /tmp/pubkey.pem
+    - for arch in x86_64 x86_64-musl; do
+        d="public/$arch";
+        [ -d "$d" ] && [ -n "$(ls -A "$d"/*.xbps 2>/dev/null)" ] || continue;
+        XBPS_ARCH="$arch" xbps-rindex -a "$d"/*.xbps;
+        XBPS_ARCH="$arch" xbps-rindex -s "$d" --signedby "$SIGN_NAME" --privkey /tmp/privkey.pem;
+        cp /tmp/pubkey.pem "$d/pubkey.pem";
+      done
+  artifacts:
+    paths:
+      - public/
+
+pages:
+  stage: deploy
+  needs:
+    - index_sign_deploy
+  script:
+    - echo "Publishing to GitLab Pages"
+  artifacts:
+    paths:
+      - public
+  only:
+    - main
