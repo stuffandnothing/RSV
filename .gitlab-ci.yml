@@ -1,8 +1,30 @@
 # .gitlab-ci.yml
 #
 # Builds a custom Void Linux (xbps) repo for x86_64 and x86_64-musl
-# entirely inside GitLab CI, using xbps-src's own self-bootstrapping
-# chroot (no official Void docker image required).
+# entirely inside GitLab CI.
+#
+# Uses void-linux's own container images (ghcr.io/void-linux/void-*-full)
+# and xbps-src's "ethereal" chroot-style, which builds directly inside the
+# (disposable) container's own root filesystem instead of unshare()'ing a
+# nested chroot. This is required because GitLab.com's shared Docker
+# runners run unprivileged and block the unshare(2)/CLONE_NEWUSER syscalls
+# that xbps-src's default chroot-style needs - confirmed by testing locally
+# (`docker run` without --security-opt seccomp=unconfined reproduces the
+# same "failed to unshare from the current namespace" failure GitLab hit).
+#
+# Two known xbps-src/ethereal quirks worked around below (also verified
+# locally, both against the actual void-linux/void-packages HEAD):
+#   1. Ethereal requires XBPS_MASTERDIR symlinked to `/`, which makes
+#      `cp -f /etc/resolv.conf $XBPS_MASTERDIR/etc` copy the file onto
+#      itself - GNU cp errors on that. Patched via sed in before_script.
+#   2. The void-packages checkout must NOT live at exactly `/void-packages`
+#      (that's the literal path ethereal symlinks itself to under
+#      XBPS_MASTERDIR=/, so cloning there is a self-referential collision).
+#      Cloned into /build/void-packages instead.
+#   3. Cross-building via `-A x86_64-musl` does NOT work under ethereal
+#      (there's only ever one masterdir = `/`, so the flag is silently
+#      ignored). Instead, each arch uses its own native void-*-full image
+#      and builds natively - no -A flag.
 #
 # Required CI/CD variables (Settings > CI/CD > Variables, masked+protected):
 #   SIGN_PRIVKEY_B64  - base64 of your xbps-rindex private key (privkey.pem)
@@ -31,17 +53,19 @@ stages:
 
 .build_template: &build_template
   stage: build
-  image: debian:bookworm-slim
   before_script:
-    - apt-get update
-    - apt-get install -y --no-install-recommends
-        git curl ca-certificates tar xz-utils unzip
-        build-essential bash coreutils gawk sed
-        perl libarchive-tools socat rsync
+    - mkdir -p /build && cd /build
+    - xbps-install -Suy xbps
+    - xbps-install -S
+    - xbps-install -y bash git perl libarchive file
     - git clone --depth 1 https://github.com/void-linux/void-packages.git
-    - cp -rv srcpkgs/. void-packages/srcpkgs/
+    - cp -r "$CI_PROJECT_DIR"/srcpkgs/. void-packages/srcpkgs/
     - cd void-packages
-    - echo "XBPS_ALLOW_CHROOT_BREAKOUT=yes" >> etc/conf
+    # work around ethereal + XBPS_MASTERDIR=/ copying resolv.conf onto itself
+    - sed -i "s#cp -f /etc/resolv.conf \$XBPS_MASTERDIR/etc#[ \"\$(readlink -f /etc/resolv.conf)\" = \"\$(readlink -f \$XBPS_MASTERDIR/etc/resolv.conf)\" ] || cp -f /etc/resolv.conf \$XBPS_MASTERDIR/etc#" common/xbps-src/shutils/chroot.sh
+    - ln -s / masterdir
+    - export XBPS_CHROOT_CMD=ethereal
+    - export XBPS_ALLOW_CHROOT_BREAKOUT=yes
   artifacts:
     paths:
       - public/
@@ -49,19 +73,19 @@ stages:
 
 build:x86_64:
   <<: *build_template
+  image: ghcr.io/void-linux/void-glibc-full:latest
   script:
-    - ./xbps-src binary-bootstrap
     - for pkg in $PACKAGES; do ./xbps-src pkg "$pkg"; done
-    - mkdir -p ../public/x86_64
-    - cp hostdir/binpkgs/*.x86_64.xbps ../public/x86_64/ 2>/dev/null || true
+    - mkdir -p "$CI_PROJECT_DIR/public/x86_64"
+    - cp hostdir/binpkgs/*.x86_64.xbps "$CI_PROJECT_DIR/public/x86_64/" 2>/dev/null || true
 
 build:x86_64-musl:
   <<: *build_template
+  image: ghcr.io/void-linux/void-musl-full:latest
   script:
-    - ./xbps-src -A x86_64-musl binary-bootstrap
-    - for pkg in $PACKAGES; do ./xbps-src -A x86_64-musl pkg "$pkg"; done
-    - mkdir -p ../public/x86_64-musl
-    - cp hostdir/binpkgs/*.x86_64-musl.xbps ../public/x86_64-musl/ 2>/dev/null || true
+    - for pkg in $PACKAGES; do ./xbps-src pkg "$pkg"; done
+    - mkdir -p "$CI_PROJECT_DIR/public/x86_64-musl"
+    - cp hostdir/binpkgs/*.x86_64-musl.xbps "$CI_PROJECT_DIR/public/x86_64-musl/" 2>/dev/null || true
 
 index_sign_deploy:
   stage: deploy
