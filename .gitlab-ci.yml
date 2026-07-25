@@ -37,7 +37,7 @@ stages:
     - apt-get install -y --no-install-recommends
         git curl ca-certificates tar xz-utils unzip
         build-essential bash coreutils gawk sed
-        flock perl libarchive-tools socat rsync
+        perl libarchive-tools socat rsync
     - git clone --depth 1 https://github.com/void-linux/void-packages.git
     - cp -rv srcpkgs/. void-packages/srcpkgs/
     - cd void-packages
