@@ -11,7 +11,7 @@
 #
 pkgname=rsv-ng
 version=62
-revision=1
+revision=2
 _commit=b1db96b9bc49c18eac9df8fad2e87d38e0766e5c
 distfiles="https://gitlab.com/runit-rsv/rsv-main/-/archive/${_commit}/rsv-main-${_commit}.tar.gz"
 checksum=5ea87e3f0a2c8f4cf103aa5638ae84adcf270cc71b4cdb1925c149a9bb531892
@@ -27,9 +27,9 @@ noarch=yes
 
 do_install() {
 	vbin rsv
-	vcompletion rsv.bash bash
-	vcompletion rsv.fish fish
-	vcompletion rsv.zsh zsh
+	vcompletion rsv.bash bash rsv
+	vcompletion rsv.fish fish rsv
+	vcompletion rsv.zsh zsh rsv
 	vman rsv.1
 	vlicense LICENSE
 	vdoc README.md
