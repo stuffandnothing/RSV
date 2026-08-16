@@ -124,13 +124,13 @@ if [[ $USER_MODE -eq 0 ]]; then
             ;;
     esac
 
-    # /var/service (void and the generic fallback) is normally created by the
-    # running system, not shipped as part of the base install. In a chroot —
-    # e.g. during a Void install, before first boot — it may not exist yet, so
-    # mkdir -p would create it as a plain directory instead of runit's actual
-    # runsvdir. Match Void's own install instructions: when runit isn't
-    # actually running, link straight into /etc/runit/runsvdir/default.
-    if [[ "$RUNSVDIR" == "/var/service" && ! -e "$RUNSVDIR" ]] && ! _is_runit_running; then
+    # /var/service (void and the generic fallback) is only meaningful once
+    # runit is actually supervising it. In a chroot — e.g. during a Void
+    # install, before first boot — installers enable services straight into
+    # /etc/runit/runsvdir/default (see Void's own chroot install docs), and
+    # /var/service may not reflect that at all. When runit isn't running,
+    # follow the same convention rather than trusting /var/service.
+    if [[ "$RUNSVDIR" == "/var/service" ]] && ! _is_runit_running; then
         RUNSVDIR="/etc/runit/runsvdir/default"
         _SYS_RUNSVDIR="/etc/runit/runsvdir/default"
     fi

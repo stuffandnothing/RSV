@@ -216,7 +216,7 @@ Paths can be overridden with environment variables:
 
 rsv detects whether runit is actually running by checking if PID 1's process name is runit or runsvdir, falling back to a pgrep scan for either process — this correctly handles containers where runit runs as PID 2+ under an init shim like tini or docker-init.
 
-On Void (and any distro whose default runsvdir is `/var/service`), that same check also covers chroots: `/var/service` is normally created by the running system rather than shipped with the base install, so if it doesn't exist yet and runit isn't running, rsv enables services straight into `/etc/runit/runsvdir/default` instead — matching Void's own documented chroot install steps.
+On Void (and any distro whose default runsvdir is `/var/service`), that same check also covers chroots: `/var/service` only reflects reality once runit is actually supervising it, so whenever runit isn't running, rsv operates on `/etc/runit/runsvdir/default` instead — matching Void's own documented chroot install steps (and how Void's installer itself enables services pre-boot).
 
 ```
 $ rsv list
