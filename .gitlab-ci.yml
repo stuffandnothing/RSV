@@ -65,6 +65,14 @@
 # The deploy job below also drops one in each arch dir for people who
 # prefer to preload it into /var/db/xbps/keys/ manually.
 #
+# aur job: pushes PKGBUILD to the AUR (aur.archlinux.org/rsv-ng.git)
+# whenever PKGBUILD changes on main - see ci-aur-push.sh for why this is
+# only needed for PKGBUILD edits, not every commit. Required CI/CD
+# variable (Settings > CI/CD > Variables, masked+protected):
+#   AUR_SSH_PRIVATE_KEY_B64 - base64 of the private half of an SSH key
+#                             registered to your AUR account (see
+#                             ci-aur-push.sh for how to generate one).
+#
 # List the packages you maintain (from void-packages srcpkgs/) here:
 variables:
   PACKAGES: "rsv-ng"
@@ -149,3 +157,16 @@ pages:
       - public
   only:
     - main
+
+aur:
+  stage: deploy
+  image: archlinux:base
+  needs: []
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - PKGBUILD
+  before_script:
+    - pacman -Syu --noconfirm --needed base-devel git openssh shadow
+  script:
+    - sh "$CI_PROJECT_DIR"/ci-aur-push.sh
