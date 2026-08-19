@@ -2,7 +2,11 @@
 #
 # This is a snapshot package: it pins a specific commit of the rsv-main
 # repo rather than tracking git HEAD (xbps-src has no VCS-package concept
-# like AUR's pkgver()). To release an update:
+# like AUR's pkgver()). In CI, ci-prepare.sh rewrites _commit/version/
+# revision/checksum below to the current commit before every build, so
+# the values committed here are only a fallback for building locally
+# outside CI (e.g. a manual void-packages checkout). To update them by
+# hand for local testing:
 #   1. bump _commit to the new tip
 #   2. bump version (e.g. to the new `git rev-list --count HEAD`)
 #   3. reset revision=1

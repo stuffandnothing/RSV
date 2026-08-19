@@ -66,23 +66,57 @@
 # prefer to preload it into /var/db/xbps/keys/ manually.
 #
 # aur job: pushes PKGBUILD to the AUR (aur.archlinux.org/rsv-ng.git)
-# whenever PKGBUILD changes on main - see ci-aur-push.sh for why this is
-# only needed for PKGBUILD edits, not every commit. Required CI/CD
-# variable (Settings > CI/CD > Variables, masked+protected):
+# whenever PKGBUILD or a shipped file changes on main - it's a VCS/-git
+# style AUR package, so payload-only changes don't strictly need a push,
+# but are included in the trigger list anyway for consistency with the
+# void jobs below. Required CI/CD variable (Settings > CI/CD > Variables,
+# masked+protected):
 #   AUR_SSH_PRIVATE_KEY_B64 - base64 of the private half of an SSH key
 #                             registered to your AUR account (see
 #                             ci-aur-push.sh for how to generate one).
 #
+# void build/deploy jobs: unlike the AUR package, srcpkgs/rsv-ng/template
+# is a *pinned snapshot* (xbps-src has no VCS-package concept) - it names
+# an exact _commit/version/checksum to fetch. ci-prepare.sh now rewrites
+# those three fields to the current $CI_COMMIT_SHA before every build, so
+# the Void package always tracks current HEAD instead of staying frozen
+# at whatever commit the template last happened to name. GIT_DEPTH is set
+# to 0 (full clone) below so `git rev-list --count HEAD`, used for the
+# generated version, isn't undercounted by a shallow clone.
+#
+# Both the aur job and the void build/deploy jobs are gated by `rules:
+# changes:` on the files that actually get shipped into a package (see
+# PKGBUILD's package() and srcpkgs/rsv-ng/template's do_install()), so
+# pushes that don't touch package content (e.g. this file, docs, CI
+# scripts) don't trigger pointless rebuilds/republishes.
+#
 # List the packages you maintain (from void-packages srcpkgs/) here:
 variables:
   PACKAGES: "rsv-ng"
+  GIT_DEPTH: "0"
 
 stages:
   - build-images
   - build
   - deploy
 
+.installed_files: &installed_files
+  - srcpkgs/rsv-ng/template
+  - rsv
+  - rsv.bash
+  - rsv.fish
+  - rsv.zsh
+  - rsv.1
+  - LICENSE
+  - README.md
+
+.void_rules: &void_rules
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes: *installed_files
+
 build-images:
+  <<: *void_rules
   stage: build-images
   image: docker:27
   services:
@@ -111,7 +145,7 @@ build-images:
     expire_in: 1 hour
 
 build:x86_64:
-  <<: *build_template
+  <<: [*build_template, *void_rules]
   image: $CI_REGISTRY_IMAGE/void-glibc-bash:latest
   script:
     - for pkg in $PACKAGES; do ./xbps-src pkg "$pkg"; done
@@ -119,7 +153,7 @@ build:x86_64:
     - cp hostdir/binpkgs/*.x86_64.xbps "$CI_PROJECT_DIR/public/x86_64/" 2>/dev/null || true
 
 build:x86_64-musl:
-  <<: *build_template
+  <<: [*build_template, *void_rules]
   image: $CI_REGISTRY_IMAGE/void-musl-bash:latest
   script:
     - for pkg in $PACKAGES; do ./xbps-src pkg "$pkg"; done
@@ -127,6 +161,7 @@ build:x86_64-musl:
     - cp hostdir/binpkgs/*.x86_64-musl.xbps "$CI_PROJECT_DIR/public/x86_64-musl/" 2>/dev/null || true
 
 index_sign_deploy:
+  <<: *void_rules
   stage: deploy
   image: debian:bookworm-slim
   needs:
@@ -146,6 +181,7 @@ index_sign_deploy:
       - public/
 
 pages:
+  <<: *void_rules
   stage: deploy
   needs:
     - index_sign_deploy
@@ -155,8 +191,6 @@ pages:
   artifacts:
     paths:
       - public
-  only:
-    - main
 
 aur:
   stage: deploy
@@ -166,6 +200,13 @@ aur:
     - if: '$CI_COMMIT_BRANCH == "main"'
       changes:
         - PKGBUILD
+        - rsv
+        - rsv.bash
+        - rsv.fish
+        - rsv.zsh
+        - rsv.1
+        - LICENSE
+        - README.md
   before_script:
     - pacman -Syu --noconfirm --needed base-devel git openssh shadow
   script:
