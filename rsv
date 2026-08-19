@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # rsv - runit service manager
 #Copyright (C) 2026 cyridge@proton.me
 #
