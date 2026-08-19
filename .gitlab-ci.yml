@@ -142,6 +142,7 @@ pages:
   needs:
     - index_sign_deploy
   script:
+    - sh "$CI_PROJECT_DIR"/gen-index.sh
     - echo "Publishing to GitLab Pages"
   artifacts:
     paths:

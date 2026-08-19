@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rsv-ng void repo</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: ui-monospace, SFMono-Regular, Consolas, Menlo, monospace;
+    max-width: 60rem;
+    margin: 2rem auto;
+    padding: 0 1rem;
+    line-height: 1.5;
+  }
+  h1 { font-size: 1.3rem; }
+  table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+  th, td { text-align: left; padding: 0.35rem 0.75rem 0.35rem 0; border-bottom: 1px solid #8888; }
+  th { font-weight: normal; opacity: 0.7; }
+  a { text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, pre {
+    background: #80808022;
+    border-radius: 4px;
+  }
+  pre { padding: 0.75rem; overflow-x: auto; }
+  code { padding: 0.1rem 0.3rem; }
+  .muted { opacity: 0.6; }
+  nav a { margin-right: 1rem; }
+</style>
+</head>
+<body>
+<h1>rsv-ng void repo</h1>
+<p class="muted">Void Linux (xbps) package repository, built by CI on every push to main.</p>
+<h2>Install</h2>
+<pre>xbps-install -R https://runit-rsv.gitlab.io/rsv-main/ARCH rsv-ng</pre>
+<p class="muted">Replace <code>ARCH</code> with one of the architectures below, matching <code>xbps-uhelper arch</code> on your system.</p>
+<h2>Architectures</h2>
+<table>
+<tr><th>arch</th></tr>
+<tr><td><a href="x86_64/index.html">x86_64</a></td></tr>
+<tr><td><a href="x86_64-musl/index.html">x86_64-musl</a></td></tr>
+</table>
+<p class="muted"><a href="https://gitlab.com/runit-rsv/rsv-main">source</a></p>
+</body>
+</html>
