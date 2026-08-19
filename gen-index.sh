@@ -95,12 +95,18 @@ gen_arch_index() {
 }
 
 gen_root_index() {
+	# CI_PAGES_URL/CI_PROJECT_URL are GitLab-provided and always reflect
+	# where *this* project's Pages/repo actually live right now (unique
+	# domain or not), instead of a hardcoded URL that can drift stale.
+	pages_url="${CI_PAGES_URL:-https://runit-rsv.gitlab.io/rsv-main}"
+	source_url="${CI_PROJECT_URL:-https://gitlab.com/runit-rsv/rsv-main}"
+
 	{
 		page_head "rsv-ng void repo"
 		printf '<h1>rsv-ng void repo</h1>\n'
 		printf '<p class="muted">Void Linux (xbps) package repository, built by CI on every push to main.</p>\n'
 
-		printf '<h2>Install</h2>\n<pre>xbps-install -R https://runit-rsv.gitlab.io/rsv-main/ARCH rsv-ng</pre>\n'
+		printf '<h2>Install</h2>\n<pre>xbps-install -R %s/ARCH rsv-ng</pre>\n' "$(html_escape "$pages_url")"
 		printf '<p class="muted">Replace <code>ARCH</code> with one of the architectures below, matching <code>xbps-uhelper arch</code> on your system.</p>\n'
 
 		printf '<h2>Architectures</h2>\n<table>\n<tr><th>arch</th></tr>\n'
@@ -110,7 +116,7 @@ gen_root_index() {
 		done
 		printf '</table>\n'
 
-		printf '<p class="muted"><a href="https://gitlab.com/runit-rsv/rsv-main">source</a></p>\n'
+		printf '<p class="muted"><a href="%s">source</a></p>\n' "$(html_escape "$source_url")"
 		page_tail
 	} >public/index.html
 }
