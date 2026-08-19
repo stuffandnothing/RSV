@@ -52,6 +52,13 @@ xbps-install -R https://rsv-main-f9fead.gitlab.io/ARCH rsv-ng
 
 Replace `ARCH` with `x86_64` or `x86_64-musl`, matching `xbps-uhelper arch` on your system. Browse the repo (and get the current URL, since GitLab's unique-domain hash can change if Pages is reconfigured) at <https://rsv-main-f9fead.gitlab.io/>.
 
+### Arch Linux (pacman)
+
+```sh
+yay -S rsv-ng
+paru -S rsv-ng
+```
+
 ### From source
 
 Run the install script as root (system-wide) or as your user (local):
